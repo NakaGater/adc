@@ -39,7 +39,7 @@ adc/
 | M1-3 | Fillet/Chamfer + EdgeSelector解決 | US-05 |
 | M1-4 | Pattern展開(provides添字) | US-05 |
 | M1-5 | アンカー2段束縛+再束縛テスト(定義変更→再buildで束縛維持/E-ANCHOR-BIND) | US-06 |
-| M1-6 | STEP AP242エクスポート+FreeCADでの開閲ゴールデンテスト | US-07 |
+| M1-6 | STEPエクスポート+FreeCADでの開閲ゴールデンテスト。初期は既定スキーマ(AP214)で可、AP242切替はInterface_Static露出後(M3目安)にフォローアップ | US-07 |
 | M1-7 | E-FEATURE-FAIL構造化(フィレット失敗ケースの再現テスト含む) | US-08 |
 
 **Exit条件:** サンプルブラケットがbuild→STEP出力でき、`wall_t`変更→再buildで全アンカーが再束縛される。

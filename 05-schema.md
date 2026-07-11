@@ -12,10 +12,14 @@ struct Design {
   materials: Vec<Material>,      // id, density_g_cm3, name
   parts: Vec<Part>,
   assembly: Option<Assembly>,
+  dims: Vec<Dim>,                // §7。トップレベルに置く: 公差スタックは部品横断のためAnchorPathで参照する
+  geom_tols: Vec<GeomTol>,       // §7。公差は幾何の属性ではなくrationale付き制約(assertionsと同じ制約レイヤー)
   assertions: Vec<Assertion>,
   rationales: Vec<Rationale>,
 }
 ```
+
+`dims` / `geom_tols` は省略時空配列。Partは幾何の定義(features/anchors)に純化し、制約系(公差・アサーション)は全てDesign直下に集約する。
 
 ## 2. パラメータ(ADR-004)
 
