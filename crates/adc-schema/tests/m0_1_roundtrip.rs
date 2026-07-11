@@ -414,25 +414,25 @@ fn kitchen_sink() -> Design {
             },
             Param {
                 id: "bore_d".into(),
-                value: ParamValue::Determined(55.0),
+                value: ParamValue::Determined(lit(55.0)),
                 unit: Unit::Mm,
                 rationale: "r_std".into(),
             },
             Param {
                 id: "sheet_t".into(),
-                value: ParamValue::Determined(1.6),
+                value: ParamValue::Determined(lit(1.6)),
                 unit: Unit::Mm,
                 rationale: "r_std".into(),
             },
             Param {
                 id: "tilt".into(),
-                value: ParamValue::Determined(15.0),
+                value: ParamValue::Determined(lit(15.0)),
                 unit: Unit::Deg,
                 rationale: "r_assume".into(),
             },
             Param {
                 id: "mass_max".into(),
-                value: ParamValue::Determined(250.0),
+                value: ParamValue::Determined(lit(250.0)),
                 unit: Unit::G,
                 rationale: "r_req".into(),
             },
@@ -536,7 +536,7 @@ fn canonical_serialization_is_deterministic() {
 
 #[test]
 fn param_value_variants_roundtrip() {
-    assert_fragment_roundtrip(&ParamValue::Determined(55.0));
+    assert_fragment_roundtrip(&ParamValue::Determined(lit(55.0)));
     assert_fragment_roundtrip(&ParamValue::Open {
         range: (3.0, 6.0),
         nominal: 4.0,

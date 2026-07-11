@@ -21,6 +21,7 @@ mod expr;
 mod ids;
 mod part;
 mod tolerance;
+mod validate;
 
 pub use assembly::*;
 pub use assertion::*;
@@ -30,6 +31,7 @@ pub use expr::*;
 pub use ids::*;
 pub use part::*;
 pub use tolerance::*;
+pub use validate::*;
 
 /// design.ron テキストをパースする。
 ///

@@ -37,7 +37,7 @@ fn spec_sample_parses() {
         }
     );
     assert_eq!(d.params[0].unit, Unit::Mm);
-    assert_eq!(d.params[1].value, ParamValue::Determined(55.0));
+    assert_eq!(d.params[1].value, ParamValue::Determined(Expr::Lit(55.0)));
 
     // part / features
     assert_eq!(d.parts.len(), 1);

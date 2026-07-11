@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::assembly::Assembly;
 use crate::assertion::Assertion;
+use crate::expr::Expr;
 use crate::ids::{MaterialId, ParamId, RationaleId};
 use crate::part::Part;
 use crate::tolerance::{Dim, GeomTol};
@@ -44,8 +45,9 @@ pub struct Param {
 /// ADR-004: 未確定パラメータは第一級
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ParamValue {
-    Determined(f64),
-    /// nominal ∈ range (M0-2で検証)
+    /// リテラルまたは導出式(他paramの参照可)。循環は E-SCHEMA-CYCLE
+    Determined(Expr),
+    /// nominal ∈ range (E-SCHEMA-RANGE)。探索境界のため式は許さない
     Open { range: (f64, f64), nominal: f64 },
 }
 
