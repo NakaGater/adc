@@ -5,8 +5,10 @@
 //!
 //! - 種別横断検索。複数ヒット(種別間の同名、Part内スコープの同名feature/anchor)は
 //!   status: ambiguous として候補全件を返す (05-schema.md §1.1)
-//! - referenced_by は (a) 直接参照(式・binding・AnchorPath・ID参照)と
-//!   (b) 同一rationaleを共有する制約(via: "rationale:<id>")を含む(根拠の連鎖 US-04)
+//! - referenced_by = 直接の構造的参照のみ(式・binding・AnchorPath・ID参照。
+//!   変更が機械的に伝播する硬い依存)
+//! - related = rationale共有などの意味的関連(via付き。柔らかい連想 — 根拠の連鎖 US-04)。
+//!   エージェントの影響調査で両者の扱いが異なるため、リストを分離して誤消費を防ぐ
 
 use std::collections::HashMap;
 
@@ -48,7 +50,10 @@ pub struct Explanation {
     pub definition: Value,
     /// 根拠の連鎖(現状は直接rationaleの1段。Lesson参照の追跡は将来拡張)
     pub rationale_chain: Vec<Value>,
+    /// 直接の構造的参照(硬い依存)
     pub referenced_by: Vec<RefSite>,
+    /// 意味的関連(rationale共有等。柔らかい連想)
+    pub related: Vec<RefSite>,
 }
 
 /// 参照元(逆参照)の1サイト
@@ -92,15 +97,14 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
     // ---- param / material / rationale / part / instance / mate / assertion / dim
     for p in &design.params {
         if p.id == query {
-            let mut refs = refs_of(&Target::Param(p.id.clone()));
-            refs.extend(rationale_siblings(design, &p.rationale, "param", &p.id));
             matches.push(Explanation {
                 kind: "param".into(),
                 id: p.id.clone(),
                 part: None,
                 definition: to_value(p),
                 rationale_chain: chain(design, &p.rationale),
-                referenced_by: refs,
+                referenced_by: refs_of(&Target::Param(p.id.clone())),
+                related: rationale_siblings(design, &p.rationale, "param", &p.id),
             });
         }
     }
@@ -113,6 +117,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
                 definition: to_value(m),
                 rationale_chain: vec![],
                 referenced_by: refs_of(&Target::Material(m.id.clone())),
+                related: vec![],
             });
         }
     }
@@ -125,6 +130,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
                 definition: to_value(r),
                 rationale_chain: vec![to_value(r)],
                 referenced_by: refs_of(&Target::Rationale(r.id.clone())),
+                related: vec![],
             });
         }
     }
@@ -137,6 +143,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
                 definition: to_value(part),
                 rationale_chain: vec![],
                 referenced_by: refs_of(&Target::Part(part.id.clone())),
+                related: vec![],
             });
         }
         // feature / anchor はPart内スコープ (§1.1)
@@ -152,6 +159,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
                     definition: to_value(a),
                     rationale_chain: vec![],
                     referenced_by: refs_of(&Target::Anchor(part.id.clone(), a.id.clone())),
+                    related: vec![],
                 });
             }
         }
@@ -166,49 +174,47 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
                     definition: to_value(inst),
                     rationale_chain: vec![],
                     referenced_by: refs_of(&Target::Instance(inst.id.clone())),
+                    related: vec![],
                 });
             }
         }
         for mate in &assy.mates {
             if mate.id == query {
-                let mut refs = Vec::new();
-                refs.extend(rationale_siblings(design, &mate.rationale, "mate", &mate.id));
                 matches.push(Explanation {
                     kind: "mate".into(),
                     id: mate.id.clone(),
                     part: None,
                     definition: to_value(mate),
                     rationale_chain: chain(design, &mate.rationale),
-                    referenced_by: refs,
+                    referenced_by: vec![],
+                    related: rationale_siblings(design, &mate.rationale, "mate", &mate.id),
                 });
             }
         }
     }
     for a in &design.assertions {
         if a.id == query {
-            let mut refs = Vec::new();
-            refs.extend(rationale_siblings(design, &a.rationale, "assertion", &a.id));
             matches.push(Explanation {
                 kind: "assertion".into(),
                 id: a.id.clone(),
                 part: None,
                 definition: to_value(a),
                 rationale_chain: chain(design, &a.rationale),
-                referenced_by: refs,
+                referenced_by: vec![],
+                related: rationale_siblings(design, &a.rationale, "assertion", &a.id),
             });
         }
     }
     for d in &design.dims {
         if d.id == query {
-            let mut refs = refs_of(&Target::Dim(d.id.clone()));
-            refs.extend(rationale_siblings(design, &d.rationale, "dim", &d.id));
             matches.push(Explanation {
                 kind: "dim".into(),
                 id: d.id.clone(),
                 part: None,
                 definition: to_value(d),
                 rationale_chain: chain(design, &d.rationale),
-                referenced_by: refs,
+                referenced_by: refs_of(&Target::Dim(d.id.clone())),
+                related: rationale_siblings(design, &d.rationale, "dim", &d.id),
             });
         }
     }
@@ -298,6 +304,7 @@ fn find_features(
             definition: to_value(f),
             rationale_chain: vec![],
             referenced_by: refs_of(&Target::Feature(part.to_string(), query.to_string())),
+            related: vec![],
         });
     }
     if let Feature::Pattern { of, .. } = f {

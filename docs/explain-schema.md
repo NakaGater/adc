@@ -44,11 +44,16 @@ adc explain <id> [--design <path>] [--format=json]
   "definition": { ... },        // 定義本体のJSON表現(型のserde形)
   "rationale_chain": [ Rationale, ... ],  // 根拠の連鎖。現状は直接rationaleの1段
                                           // (Lesson参照の追跡は将来拡張。配列形は維持)
-  "referenced_by": [ RefSite, ... ]
+  "referenced_by": [ RefSite, ... ],      // 直接の構造的参照のみ(硬い依存)
+  "related": [ RefSite, ... ]             // 意味的関連(rationale共有等。柔らかい連想)
 }
 ```
 
-## RefSite(参照元)
+`referenced_by` と `related` の分離: エージェントの影響調査で両者の扱いが異なる
+(構造的参照は変更が機械的に伝播する。意味的関連は再検討の示唆に留まる)ため、
+リスト自体を分けて誤消費を防ぐ。
+
+## RefSite(参照元・関連元)
 
 ```json
 {
@@ -60,12 +65,13 @@ adc explain <id> [--design <path>] [--format=json]
 ```
 
 `via` の語彙:
-- フィールド名: `"z"`, `"d"`, `"at"`, `"binding"`, `"edges"`, `"pitch"`, `"value"`,
-  `"nominal"`, `"from"`, `"to"`, `"target"`, `"datums"`, `"zone"`, `"material"`,
-  `"process.thickness"`, `"a"` / `"b"`(mateの両側), `"ground"`, `"kind"`(mateの距離/角度式),
-  `"check"` / `"check.path"`(assertion), `"rationale"`(rationale本体への参照)
-- `"rationale:<id>"`: **同一rationaleを共有する制約**(直接参照ではなく根拠共有の連鎖。
-  US-04「根拠の連鎖が辿れる」のための双方向リンク)
+- referenced_by(構造的参照)のフィールド名: `"z"`, `"d"`, `"at"`, `"binding"`, `"edges"`,
+  `"pitch"`, `"value"`, `"nominal"`, `"from"`, `"to"`, `"target"`, `"datums"`, `"zone"`,
+  `"material"`, `"process.thickness"`, `"a"` / `"b"`(mateの両側), `"ground"`,
+  `"kind"`(mateの距離/角度式), `"check"` / `"check.path"`(assertion),
+  `"rationale"`(rationale本体への参照)
+- related(意味的関連): `"rationale:<id>"` = **同一rationaleを共有する制約**
+  (US-04「根拠の連鎖が辿れる」のための双方向リンク)
 
 ## 例(§9サンプル、`adc explain wall_t` 抜粋)
 
@@ -80,7 +86,9 @@ adc explain <id> [--design <path>] [--format=json]
     "definition": { "id": "wall_t", "value": { "Open": { "range": [3.0, 6.0], "nominal": 4.0 } }, "unit": "Mm", "rationale": "r_wall" },
     "rationale_chain": [{ "id": "r_wall", "author": { "Human": "nakag" }, "basis": "Assumption", "note": "剛性未評価のため仮置き。DFM検証後に確定", "timestamp": "2026-07-11T00:00:00Z" }],
     "referenced_by": [
-      { "kind": "feature", "id": "base", "part": "bracket", "via": "z" },
+      { "kind": "feature", "id": "base", "part": "bracket", "via": "z" }
+    ],
+    "related": [
       { "kind": "assertion", "id": "a_wall", "via": "rationale:r_wall" }
     ]
   }]

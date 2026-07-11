@@ -28,4 +28,18 @@ fn m0_exit_sample_parses_validates_and_explains() {
         );
         serde_json::to_string(&out).expect("explain出力はJSONシリアライズ可能なこと");
     }
+
+    // 受入(修正版): explain wall_t →
+    //   referenced_by: [base.z(feature式)] / related: [a_wall (via rationale:r_wall)]
+    let out = explain(&design, "wall_t");
+    let m = &out.matches[0];
+    assert!(m
+        .referenced_by
+        .iter()
+        .any(|s| s.kind == "feature" && s.id == "base" && s.via == "z"));
+    assert!(m
+        .related
+        .iter()
+        .any(|s| s.kind == "assertion" && s.id == "a_wall" && s.via == "rationale:r_wall"));
+    assert!(!m.referenced_by.iter().any(|s| s.id == "a_wall"));
 }

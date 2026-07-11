@@ -36,24 +36,31 @@ fn explain_wall_t_returns_definition_rationale_and_referrers() {
     let r = serde_json::to_string(&m.rationale_chain[0]).unwrap();
     assert!(r.contains("r_wall") && r.contains("Assumption"), "{r}");
 
-    // 参照元: base.z (feature式) と a_wall (assertion、rationale共有)
+    // referenced_by = 直接の構造的参照のみ: base.z (feature式)
     let has_feature_ref = m
         .referenced_by
         .iter()
         .any(|s| s.kind == "feature" && s.id == "base" && s.via == "z");
     assert!(
         has_feature_ref,
-        "参照元に base.z (feature式) を含むこと: {:#?}",
+        "referenced_by に base.z (feature式) を含むこと: {:#?}",
         m.referenced_by
     );
-    let has_assertion_ref = m
-        .referenced_by
-        .iter()
-        .any(|s| s.kind == "assertion" && s.id == "a_wall" && s.via.contains("rationale"));
     assert!(
-        has_assertion_ref,
-        "参照元に a_wall (assertion、rationale共有) を含むこと: {:#?}",
+        !m.referenced_by.iter().any(|s| s.id == "a_wall"),
+        "rationale共有はreferenced_byに混ぜないこと: {:#?}",
         m.referenced_by
+    );
+
+    // related = 意味的関連: a_wall (assertion、rationale共有)
+    let has_assertion_rel = m
+        .related
+        .iter()
+        .any(|s| s.kind == "assertion" && s.id == "a_wall" && s.via == "rationale:r_wall");
+    assert!(
+        has_assertion_rel,
+        "related に a_wall (via rationale:r_wall) を含むこと: {:#?}",
+        m.related
     );
 }
 
@@ -154,7 +161,14 @@ fn explain_output_is_json_with_stable_shape() {
         assert!(json.get(key).is_some(), "トップレベルに {key} があること");
     }
     let m = &json["matches"][0];
-    for key in ["kind", "id", "definition", "rationale_chain", "referenced_by"] {
+    for key in [
+        "kind",
+        "id",
+        "definition",
+        "rationale_chain",
+        "referenced_by",
+        "related",
+    ] {
         assert!(m.get(key).is_some(), "matchに {key} があること");
     }
 }

@@ -31,12 +31,17 @@ fn explain_wall_t_via_cli() {
     let refs = json["matches"][0]["referenced_by"]
         .as_array()
         .expect("referenced_by");
-    let has = |kind: &str, id: &str| {
+    assert!(
         refs.iter()
-            .any(|r| r["kind"] == kind && r["id"] == id)
-    };
-    assert!(has("feature", "base"), "base.z (feature式): {refs:?}");
-    assert!(has("assertion", "a_wall"), "a_wall (assertion): {refs:?}");
+            .any(|r| r["kind"] == "feature" && r["id"] == "base" && r["via"] == "z"),
+        "referenced_by に base.z (feature式): {refs:?}"
+    );
+    let rel = json["matches"][0]["related"].as_array().expect("related");
+    assert!(
+        rel.iter()
+            .any(|r| r["kind"] == "assertion" && r["id"] == "a_wall"),
+        "related に a_wall (assertion): {rel:?}"
+    );
 }
 
 #[test]
