@@ -502,6 +502,22 @@ fn resolve_placement(
 
 // ---------------------------------------------------------------- フィーチャー
 
+/// ルートのグローバル配置はワールド軸に限る(回転ルート配置は未対応)
+fn require_world_axes(f: &Frame, fid: &str) -> Result<(), CompileError> {
+    let ok = (f.x[0] - 1.0).abs() < 1e-9
+        && f.x[1].abs() < 1e-9
+        && (f.z[2] - 1.0).abs() < 1e-9
+        && f.z[0].abs() < 1e-9;
+    if ok {
+        Ok(())
+    } else {
+        Err(CompileError::Unsupported {
+            feature_id: fid.to_string(),
+            what: "ルートの回転配置は未対応(Origin/Offsetのグローバル平行移動のみ)".to_string(),
+        })
+    }
+}
+
 fn req_id<'a>(id: &'a Option<String>, kind: &str) -> Result<&'a str, CompileError> {
     id.as_deref().ok_or_else(|| CompileError::Unsupported {
         feature_id: "(無名)".to_string(),
@@ -676,24 +692,24 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
     match f {
         Feature::Block { id, x, y, z, at } => {
             let fid = req_id(id, "Block")?.to_string();
-            if !matches!(at, None | Some(Placement::Origin)) {
-                return Err(CompileError::Unsupported {
-                    feature_id: fid,
-                    what: "非ルート配置のBlockはM1-3以降".to_string(),
-                });
-            }
             if st.solid.is_some() {
                 return Err(CompileError::Unsupported {
                     feature_id: fid,
-                    what: "2つ目のルートソリッドはM1-3以降".to_string(),
+                    what: "2つ目のルートソリッドは未対応".to_string(),
                 });
             }
+            // ルートはグローバル配置(Origin / Offset(Origin基点))を許可 (§4.0)
+            let frame = match at {
+                None => world_frame(),
+                Some(p) => resolve_placement(p, st, ev, &fid)?,
+            };
+            require_world_axes(&frame, &fid)?;
             let (dx, dy, dz) = (
                 e_pos(ev, x, &fid, "x")?,
                 e_pos(ev, y, &fid, "y")?,
                 e_pos(ev, z, &fid, "z")?,
             );
-            let solid = make_box(dx, dy, dz);
+            let solid = make_box(dx, dy, dz).translated(frame.origin);
             // provides同定 (docs/provides-predicates.md: 法線方向)
             for face in solid.faces() {
                 let n = normalize(face.normal());
@@ -721,9 +737,14 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
             let r = e_pos(ev, d, req_id(id, "Cylinder")?, "d")? / 2.0;
             let hh = e_pos(ev, h, req_id(id, "Cylinder")?, "h")?;
             match (&st.solid, at) {
-                (None, None | Some(Placement::Origin)) => {
+                (None, root_at @ (None | Some(Placement::Origin | Placement::Offset { .. }))) => {
+                    let frame = match root_at {
+                        None => world_frame(),
+                        Some(p) => resolve_placement(p, st, ev, req_id(id, "Cylinder")?)?,
+                    };
+                    require_world_axes(&frame, req_id(id, "Cylinder")?)?;
                     let dir = axis_dir(axis);
-                    let tool = make_cylinder_dir([0.0, 0.0, 0.0], dir, r, hh);
+                    let tool = make_cylinder_dir(frame.origin, dir, r, hh);
                     let (side, far, near) = classify_cylinder_faces(&tool, dir);
                     if let Some(s) = side {
                         st.insert(&fid, "side", Provided::Face(s));
@@ -738,7 +759,7 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
                         &fid,
                         "axis",
                         Provided::Axis {
-                            origin: [0.0, 0.0, 0.0],
+                            origin: frame.origin,
                             dir,
                         },
                     );
@@ -777,9 +798,9 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
                     st.solid = Some(result);
                     Ok(())
                 }
-                (None, _) => Err(CompileError::Geometry {
+                (None, Some(Placement::On { .. })) => Err(CompileError::Geometry {
                     feature_id: fid,
-                    message: "ルートフィーチャーの配置はOriginのみ (05-schema.md §4.0)".into(),
+                    message: "ルートフィーチャーの配置はグローバル(Origin/Offset)のみ (05-schema.md §4.0)".into(),
                 }),
                 (Some(_), None) => Err(CompileError::Geometry {
                     feature_id: fid,

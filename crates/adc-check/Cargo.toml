@@ -1,16 +1,12 @@
 [package]
-name = "adc-cli"
+name = "adc-check"
 version.workspace = true
 edition.workspace = true
-description = "ADC CLI — adc バイナリ (07-cli.md)"
-
-[[bin]]
-name = "adc"
-path = "src/main.rs"
+description = "検証ハーネス — Checkerトレイト+実装群 (ADR-003)"
 
 [dependencies]
 adc-schema = { path = "../adc-schema" }
 adc-compile = { path = "../adc-compile" }
 adc-kernel = { path = "../adc-kernel" }
-adc-check = { path = "../adc-check" }
+serde = { workspace = true }
 serde_json = { workspace = true }

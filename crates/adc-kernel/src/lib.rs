@@ -46,6 +46,42 @@ pub struct History {
     inner: ShapeHistory,
 }
 
+/// 距離照会の対象(ソリッド全体 or 特定の面)
+pub enum DistTarget<'a> {
+    Solid(&'a Solid),
+    Face(&'a FaceHandle),
+}
+
+/// 2対象間の最小距離と最近接点 (BRepExtrema_DistShapeShape)。
+/// 失敗はOCCT例外を捕捉して構造化メッセージで返す(abortしない)。
+pub fn min_distance(
+    a: DistTarget<'_>,
+    b: DistTarget<'_>,
+) -> Result<(f64, [f64; 3], [f64; 3]), String> {
+    let owned_a;
+    let shape_a: &Shape = match a {
+        DistTarget::Solid(s) => &s.inner,
+        DistTarget::Face(f) => {
+            owned_a = f.inner.to_shape();
+            &owned_a
+        }
+    };
+    let owned_b;
+    let shape_b: &Shape = match b {
+        DistTarget::Solid(s) => &s.inner,
+        DistTarget::Face(f) => {
+            owned_b = f.inner.to_shape();
+            &owned_b
+        }
+    };
+    let d = shape_a.min_distance(shape_b).map_err(|e| e.to_string())?;
+    Ok((
+        d.distance,
+        [d.point_on_1.x, d.point_on_1.y, d.point_on_1.z],
+        [d.point_on_2.x, d.point_on_2.y, d.point_on_2.z],
+    ))
+}
+
 fn v(a: [f64; 3]) -> DVec3 {
     dvec3(a[0], a[1], a[2])
 }
@@ -144,9 +180,36 @@ impl Solid {
         ))
     }
 
+    /// ブーリアン積(共通部分)。結果と履歴を返す。失敗はabortせず構造化メッセージ。
+    pub fn intersect_with_history(&self, tool: &Solid) -> Result<(Solid, History), String> {
+        let (boolean_shape, history) = self
+            .inner
+            .intersect_with_history(&tool.inner)
+            .map_err(|e| e.to_string())?;
+        Ok((
+            Solid {
+                inner: boolean_shape.shape,
+            },
+            History { inner: history },
+        ))
+    }
+
+    /// 平行移動したコピー
+    pub fn translated(&self, d: [f64; 3]) -> Solid {
+        Solid {
+            inner: self.inner.translated(v(d)),
+        }
+    }
+
     /// 体積 (mm^3)
     pub fn volume(&self) -> f64 {
         self.inner.volume()
+    }
+
+    /// 体積重心 [x, y, z]
+    pub fn center_of_mass(&self) -> [f64; 3] {
+        let c = self.inner.center_of_mass();
+        [c.x, c.y, c.z]
     }
 
     /// STEP出力(既定スキーマ=AP214。AP242切替はInterface_Static露出後 — M1-6緩和)
@@ -204,11 +267,16 @@ impl Solid {
             .collect()
     }
 
-    /// 軸平行バウンディングボックス (min, max)
+    /// 軸平行バウンディングボックス (min, max)。
+    /// OCCTのBnd_Boxは既定でgap(数値余裕、1e-7)を含むため除去して返す
     pub fn bounding_box(&self) -> ([f64; 3], [f64; 3]) {
         let aabb = opencascade::bounding_box::aabb(&self.inner);
+        let g = aabb.get_gap();
         let (min, max) = (aabb.min(), aabb.max());
-        ([min.x, min.y, min.z], [max.x, max.y, max.z])
+        (
+            [min.x + g, min.y + g, min.z + g],
+            [max.x - g, max.y - g, max.z - g],
+        )
     }
 }
 

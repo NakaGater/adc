@@ -5,6 +5,7 @@ members = [
     "crates/adc-cli",
     "crates/adc-kernel",
     "crates/adc-compile",
+    "crates/adc-check",
 ]
 
 [workspace.package]

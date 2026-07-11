@@ -6,6 +6,9 @@
 //! - `adc export --step [--design <path>] [--out <dir>]`(M1-6)
 //!   部品ごとに <out>/<part_id>.step を出力(既定スキーマAP214 — M1-6緩和)。
 //!   exit: 0=成功 / 2=E-*エラー
+//! - `adc check [--design <path>] [--format=jsonl|text] [--filter <id,..>] [--timings]`(M2-1)
+//!   stdout=results.jsonl(正準・決定的)またはtext。timingsはstderrのみ。
+//!   exit: 0=全Pass / 1=Fail≥1 / 2=Inconclusive≥1またはE-*
 
 use std::process::ExitCode;
 
@@ -24,10 +27,11 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     match args.first().map(String::as_str) {
         Some("explain") => explain_cmd(&args[1..]),
         Some("export") => export_cmd(&args[1..]),
+        Some("check") => check_cmd(&args[1..]),
         Some(other) => Err(format!(
-            "未知のサブコマンド: {other}(使えるのは explain / export。07-cli.md参照)"
+            "未知のサブコマンド: {other}(使えるのは explain / export / check。07-cli.md参照)"
         )),
-        None => Err("usage: adc <explain|export> ...".to_string()),
+        None => Err("usage: adc <explain|export|check> ...".to_string()),
     }
 }
 
@@ -142,4 +146,98 @@ fn export_cmd(args: &[String]) -> Result<ExitCode, String> {
         println!("wrote {path}");
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn check_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let mut design_path = "./design.ron".to_string();
+    let mut format = "text".to_string();
+    let mut filter: Option<Vec<String>> = None;
+    let mut timings = false;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--design" => {
+                design_path = args
+                    .get(i + 1)
+                    .ok_or("--design にはパスが必要です")?
+                    .clone();
+                i += 2;
+            }
+            "--filter" => {
+                let v = args.get(i + 1).ok_or("--filter にはID列が必要です")?;
+                filter = Some(v.split(',').map(|s| s.trim().to_string()).collect());
+                i += 2;
+            }
+            "--timings" => {
+                timings = true;
+                i += 1;
+            }
+            f if f.starts_with("--format") => {
+                let val = f
+                    .strip_prefix("--format=")
+                    .map(str::to_string)
+                    .or_else(|| {
+                        if f == "--format" {
+                            args.get(i + 1).cloned()
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or("--format には値が必要です")?;
+                if val != "jsonl" && val != "text" {
+                    return Err(format!("checkの出力は jsonl | text: {val}"));
+                }
+                format = val;
+                i += if f == "--format" { 2 } else { 1 };
+            }
+            other => return Err(format!("不明な引数: {other}")),
+        }
+    }
+
+    let src = std::fs::read_to_string(&design_path)
+        .map_err(|e| format!("{design_path} を読めません: {e}"))?;
+    let design = match adc_schema::validate_design(&src) {
+        Ok(d) => d,
+        Err(errs) => {
+            let json = serde_json::to_string_pretty(&errs).map_err(|e| e.to_string())?;
+            println!("{json}");
+            return Ok(ExitCode::from(2));
+        }
+    };
+
+    let (mut results, times) =
+        adc_check::run_checks_with_timings(&design, &adc_schema::EvalContext::nominal());
+    if let Some(f) = &filter {
+        results.retain(|r| f.contains(&r.assert_id));
+    }
+    if timings {
+        for (id, ms) in &times {
+            if filter.as_ref().is_none_or(|f| f.contains(id)) {
+                eprintln!("timing	{id}	{ms:.3}ms");
+            }
+        }
+    }
+
+    match format.as_str() {
+        "jsonl" => print!("{}", adc_check::to_jsonl(&results)),
+        _ => {
+            for r in &results {
+                match &r.status {
+                    adc_check::CheckStatus::Pass => {
+                        println!("[PASS] {} margin={}", r.assert_id, r.margin)
+                    }
+                    adc_check::CheckStatus::Fail => {
+                        println!("[FAIL] {} margin={}", r.assert_id, r.margin);
+                        for ev in &r.evidence {
+                            println!("       {} {:?}", ev.note, ev.anchors);
+                        }
+                    }
+                    adc_check::CheckStatus::Inconclusive { reason } => {
+                        println!("[INCONCLUSIVE] {}: {reason}", r.assert_id)
+                    }
+                }
+            }
+        }
+    }
+    Ok(ExitCode::from(adc_check::exit_code(&results)))
 }
