@@ -197,6 +197,19 @@ impl fmt::Display for FeatureFailError {
     }
 }
 
+/// E-MATE-UNSOLVED: アセンブリ逐次解決の失敗 {mate_id, 原因} (05-schema.md §8, ADR-005)
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct MateUnsolvedError {
+    pub mate_id: String,
+    pub reason: String,
+}
+
+impl fmt::Display for MateUnsolvedError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "E-MATE-UNSOLVED: mate \"{}\": {}", self.mate_id, self.reason)
+    }
+}
+
 impl fmt::Display for AnchorBindError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

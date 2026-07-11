@@ -1,6 +1,5 @@
 //! チェッカー実装群。marginの定義は docs/checkers.md が正典 (ADR-003)。
 
-use adc_compile::BoundAnchorRef;
 use adc_kernel::{min_distance, DistTarget, Solid};
 use adc_schema::{Assertion, Check, Evaluator, GeomRef, Scope};
 
@@ -94,36 +93,32 @@ impl Checker for BoundingBoxChecker {
 
 pub struct ClearanceChecker;
 
-enum Target<'m> {
-    Solid(&'m Solid),
-    Face(&'m adc_kernel::FaceHandle),
-}
-
 /// GeomRef → 距離対象(+表示ラベル)。
 /// アンカーはFaceのみ対応(エッジ/軸由来のEvidence帰属は gotcha #2 の実在検証を
 /// 経た面providesに限る — docs/checkers.md)
-fn resolve_target<'m>(model: &'m CompiledModel, g: &GeomRef) -> Result<(Target<'m>, String), String> {
+/// Clearance対象。アンカーは**mate解決後の配置済み**Face/ソリッドで解決する (M3)
+enum OwnedTarget<'m> {
+    Solid(&'m Solid),
+    PlacedFace(adc_kernel::FaceHandle, &'m Solid),
+}
+
+fn resolve_target<'m>(model: &'m CompiledModel, g: &GeomRef) -> Result<(OwnedTarget<'m>, String), String> {
     match g {
         GeomRef::Part(p) => {
             let cp = part_solid(model, p)?;
-            Ok((Target::Solid(&cp.solid), p.clone()))
+            Ok((OwnedTarget::Solid(&cp.solid), p.clone()))
         }
         GeomRef::Anchor(path) => {
-            let label = path.to_string();
-            let part = model
-                .instances
-                .iter()
-                .find(|(iid, _)| *iid == path.instance)
-                .map(|(_, pid)| pid.clone())
-                .ok_or_else(|| format!("インスタンス \"{}\" が存在しません", path.instance))?;
-            let cp = part_solid(model, &part)?;
-            match cp.anchor(&path.anchor) {
-                Some(BoundAnchorRef::Face(f)) => Ok((Target::Face(f), label)),
-                Some(_) => Err(format!(
-                    "アンカー \"{label}\" はFace束縛ではありません(ClearanceのアンカーはFaceのみ対応)"
-                )),
-                None => Err(format!("アンカー \"{label}\" が束縛されていません")),
+            if let Some(e) = &model.assembly_error {
+                return Err(format!("mate解決に失敗しています: {e}"));
             }
+            let label = path.to_string();
+            let face = model.placed_anchor_face(&path.instance, &path.anchor)?;
+            let solid = model
+                .instance_solids
+                .get(&path.instance)
+                .ok_or_else(|| format!("インスタンス \"{}\" が未配置です", path.instance))?;
+            Ok((OwnedTarget::PlacedFace(face, solid), label))
         }
     }
 }
@@ -147,15 +142,39 @@ impl Checker for ClearanceChecker {
                 return CheckResult::inconclusive(&a.id, self.id(), e)
             }
         };
-        fn to_dist<'m>(t: &Target<'m>) -> DistTarget<'m> {
+        fn to_dist<'a>(t: &'a OwnedTarget<'_>) -> DistTarget<'a> {
             match t {
-                Target::Solid(s) => DistTarget::Solid(s),
-                Target::Face(f) => DistTarget::Face(f),
+                OwnedTarget::Solid(s) => DistTarget::Solid(s),
+                OwnedTarget::PlacedFace(f, _) => DistTarget::Face(f),
             }
         }
-        let (d, p1, p2) = match min_distance(to_dist(&ta), to_dist(&tb)) {
+        let sa = match &ta {
+            OwnedTarget::Solid(s) => *s,
+            OwnedTarget::PlacedFace(_, s) => s,
+        };
+        let sb = match &tb {
+            OwnedTarget::Solid(s) => *s,
+            OwnedTarget::PlacedFace(_, s) => s,
+        };
+        let (d_raw, p1, p2) = match min_distance(to_dist(&ta), to_dist(&tb)) {
             Ok(r) => r,
             Err(e) => return CheckResult::inconclusive(&a.id, self.id(), e),
+        };
+        // 交差時(距離≈0)のmeasuredは負の貫入指標に統一(2026-07-12決定):
+        // 大きさ = 所属ソリッドの交差体積の立方根(等価キューブ辺長)。
+        // 厳密な最小分離距離ではない近似指標(docs/checkers.md)
+        let d = if d_raw <= 1e-9 {
+            let overlap = match sa.intersect_with_history(sb) {
+                Ok((c, _)) => c.volume(),
+                Err(e) => return CheckResult::inconclusive(&a.id, self.id(), e),
+            };
+            if overlap > 1e-9 {
+                -overlap.cbrt()
+            } else {
+                0.0
+            }
+        } else {
+            d_raw
         };
         // margin = (measured - min)/|min|(min≈0のときは measured そのもの — docs/checkers.md)
         let margin = if min_v.abs() < 1e-12 {
@@ -164,10 +183,19 @@ impl Checker for ClearanceChecker {
             (d - min_v) / min_v.abs()
         };
         let pass = d >= min_v;
+        let note = if d < 0.0 {
+            format!(
+                "貫入(交差): 貫入指標 {}(交差体積の立方根)、要求クリアランス {} 以上",
+                q(d),
+                q(min_v)
+            )
+        } else {
+            format!("最小距離 {}(要求 {} 以上)", q(d), q(min_v))
+        };
         let evidence = vec![Evidence {
             anchors: vec![la, lb],
             points: vec![q3(p1), q3(p2)],
-            note: format!("最小距離 {}(要求 {} 以上)", q(d), q(min_v)),
+            note,
         }];
         CheckResult {
             assert_id: a.id.clone(),
@@ -198,21 +226,41 @@ impl Checker for NoInterferenceChecker {
         let Check::NoInterference { scope } = &a.check else {
             unreachable!()
         };
-        // ペア列挙(単部品内は対象外 — Assy全ペア or 明示ペア)
-        let pairs: Vec<(String, String)> = match scope {
+        if let Some(e) = &model.assembly_error {
+            return CheckResult::inconclusive(
+                &a.id,
+                self.id(),
+                format!("mate解決に失敗しています: {e}"),
+            );
+        }
+        // ペア列挙: 配置済みインスタンスのペア(単部品内は対象外)。
+        // 宣言順非依存の決定的出力のためinstance id昇順に正準化
+        let mut all: Vec<&(String, String)> = model.instances.iter().collect();
+        all.sort_by(|a, b| a.0.cmp(&b.0));
+        let pairs: Vec<(&str, &str)> = match scope {
             Scope::All => {
                 let mut v = Vec::new();
-                for i in 0..model.instances.len() {
-                    for j in (i + 1)..model.instances.len() {
-                        v.push((
-                            model.instances[i].1.clone(),
-                            model.instances[j].1.clone(),
-                        ));
+                for i in 0..all.len() {
+                    for j in (i + 1)..all.len() {
+                        v.push((all[i].0.as_str(), all[j].0.as_str()));
                     }
                 }
                 v
             }
-            Scope::Pairs(ps) => ps.clone(),
+            Scope::Pairs(ps) => {
+                // 部品ペア指定 → 該当インスタンスペアへ展開
+                let mut v = Vec::new();
+                for (pa, pb) in ps {
+                    for i in 0..all.len() {
+                        for j in 0..all.len() {
+                            if i != j && all[i].1 == *pa && all[j].1 == *pb && i < j {
+                                v.push((all[i].0.as_str(), all[j].0.as_str()));
+                            }
+                        }
+                    }
+                }
+                v
+            }
         };
         if pairs.is_empty() {
             return CheckResult::inconclusive(
@@ -226,47 +274,54 @@ impl Checker for NoInterferenceChecker {
         let mut worst_ratio = 0.0f64;
         let mut min_dist = f64::INFINITY;
         let mut evidence = vec![];
-        for (pa, pb) in &pairs {
-            let (ca, cb) = match (part_solid(model, pa), part_solid(model, pb)) {
-                (Ok(x), Ok(y)) => (x, y),
-                (Err(e), _) | (_, Err(e)) => {
-                    return CheckResult::inconclusive(&a.id, self.id(), e)
-                }
+        for (ia, ib) in &pairs {
+            let (Some(sa), Some(sb)) = (
+                model.instance_solids.get(*ia),
+                model.instance_solids.get(*ib),
+            ) else {
+                return CheckResult::inconclusive(
+                    &a.id,
+                    self.id(),
+                    format!("インスタンス {ia}/{ib} が未配置(部品コンパイル失敗の可能性)"),
+                );
             };
-            let (common, _hist) = match ca.solid.intersect_with_history(&cb.solid) {
+            let (common, _hist) = match sa.intersect_with_history(sb) {
                 Ok(r) => r,
                 Err(e) => return CheckResult::inconclusive(&a.id, self.id(), e),
             };
             let overlap = common.volume();
             if overlap > OVERLAP_TOL {
                 total_overlap += overlap;
-                worst_ratio = worst_ratio
-                    .max(overlap / ca.solid.volume().min(cb.solid.volume()));
+                worst_ratio = worst_ratio.max(overlap / sa.volume().min(sb.volume()));
                 evidence.push(Evidence {
-                    anchors: vec![pa.clone(), pb.clone()],
+                    anchors: vec![ia.to_string(), ib.to_string()],
                     points: vec![q3(common.center_of_mass())],
                     note: format!("交差体積 {} mm^3", q(overlap)),
                 });
             } else {
-                match min_distance(
-                    DistTarget::Solid(&ca.solid),
-                    DistTarget::Solid(&cb.solid),
-                ) {
-                    Ok((d, _, _)) => min_dist = min_dist.min(d),
+                // 干渉マップ(M3-3): 非干渉ペアも距離とmarginを一覧に載せる
+                match min_distance(DistTarget::Solid(sa), DistTarget::Solid(sb)) {
+                    Ok((d, _, _)) => {
+                        min_dist = min_dist.min(d);
+                        evidence.push(Evidence {
+                            anchors: vec![ia.to_string(), ib.to_string()],
+                            points: vec![],
+                            note: format!("最小距離 {}(非干渉)", q(d)),
+                        });
+                    }
                     Err(e) => return CheckResult::inconclusive(&a.id, self.id(), e),
                 }
             }
         }
 
         let fail = total_overlap > OVERLAP_TOL;
-        // margin: Fail = -(最悪交差体積比)、Pass = 最小ペア距離/結合bbox対角 (docs/checkers.md)
         let margin = if fail {
             -worst_ratio
         } else {
             let mut lo = [f64::INFINITY; 3];
             let mut hi = [f64::NEG_INFINITY; 3];
-            for cp in model.parts.values() {
-                let (mn, mx) = cp.solid.bounding_box();
+            for s in model.instance_solids.values() {
+                let (mn, mx) = s.bounding_box();
                 for i in 0..3 {
                     lo[i] = lo[i].min(mn[i]);
                     hi[i] = hi[i].max(mx[i]);
@@ -275,10 +330,10 @@ impl Checker for NoInterferenceChecker {
             let diag = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2)
                 + (hi[2] - lo[2]).powi(2))
             .sqrt();
-            if diag > 0.0 {
+            if diag > 0.0 && min_dist.is_finite() {
                 min_dist / diag
             } else {
-                min_dist
+                0.0
             }
         };
         CheckResult {
@@ -393,23 +448,63 @@ impl Checker for CogChecker {
         }
         let mut total_m = 0.0;
         let mut moment = [0.0; 3];
-        for part in &bodies {
-            let cp = match part_solid(model, part) {
-                Ok(cp) => cp,
-                Err(reason) => return CheckResult::inconclusive(&a.id, self.id(), reason),
-            };
-            let Some(Some(density)) = model.part_density.get(*part) else {
+        if !model.instances.is_empty() {
+            if let Some(e) = &model.assembly_error {
                 return CheckResult::inconclusive(
                     &a.id,
                     self.id(),
-                    format!("part \"{part}\" の材料(密度)が未定義です"),
+                    format!("mate解決に失敗しています: {e}"),
                 );
-            };
-            let m = cp.solid.volume() * density / 1000.0;
-            let c = cp.solid.center_of_mass();
-            total_m += m;
-            for i in 0..3 {
-                moment[i] += m * c[i];
+            }
+            // 配置済みインスタンスの質量加重合成 (M3)
+            for (inst, part) in &model.instances {
+                if part_solid(model, part).is_err() {
+                    return CheckResult::inconclusive(
+                        &a.id,
+                        self.id(),
+                        format!("part \"{part}\" のコンパイルに失敗しています"),
+                    );
+                }
+                let Some(Some(density)) = model.part_density.get(part) else {
+                    return CheckResult::inconclusive(
+                        &a.id,
+                        self.id(),
+                        format!("part \"{part}\" の材料(密度)が未定義です"),
+                    );
+                };
+                let Some(solid) = model.instance_solids.get(inst) else {
+                    return CheckResult::inconclusive(
+                        &a.id,
+                        self.id(),
+                        format!("インスタンス \"{inst}\" が未配置です"),
+                    );
+                };
+                let m = solid.volume() * density / 1000.0;
+                let c = solid.center_of_mass();
+                total_m += m;
+                for i in 0..3 {
+                    moment[i] += m * c[i];
+                }
+            }
+        } else {
+            for part in &bodies {
+                let cp = match part_solid(model, part) {
+                    Ok(cp) => cp,
+                    Err(reason) => return CheckResult::inconclusive(&a.id, self.id(), reason),
+                };
+                let Some(Some(density)) = model.part_density.get(*part) else {
+                    return CheckResult::inconclusive(
+                        &a.id,
+                        self.id(),
+                        format!("part \"{part}\" の材料(密度)が未定義です"),
+                    );
+                };
+                let m = cp.solid.volume() * density / 1000.0;
+                let c = cp.solid.center_of_mass();
+                total_m += m;
+                for i in 0..3 {
+                    moment[i] += m * c[i];
+                }
             }
         }
         let c = [

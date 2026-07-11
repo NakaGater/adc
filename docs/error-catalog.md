@@ -22,7 +22,7 @@
 | コード | 検出内容 | 検出例 | 検出フェーズ |
 |---|---|---|---|
 | E-SCHEMA-PARSE | RON構文・型エラー(行番号付き)。未知/欠落フィールド含む | `intent "コロン欠落"` / `Param(idd: ...)` | parse |
-| E-SCHEMA-REF | 未定義参照: 式内param / Part内feature(binding) / anchor(`instance.anchor`) / material / part / instance / dim(公差スタック経路) / GeomTol.datumsの非Datumアンカー | `z: param("nope")` / `feature("ghost").face(...)` / `datums: ["i1.top"]`(topがFace) | validate |
+| E-SCHEMA-REF | 未定義参照: 式内param / Part内feature(binding) / anchor(`instance.anchor`) / material / part / instance / dim(公差スタック経路) / GeomTol.datumsの非Datumアンカー。**M3追加**: 非ground部品のグローバル配置とmate位置決めの併用禁止・groundの被拘束側(b)指定禁止(05-schema.md §5) | `z: param("nope")` / `feature("ghost").face(...)` / `datums: ["i1.top"]`(topがFace) | validate |
 | E-SCHEMA-RATIONALE | 未定義rationale参照(param/assertion/mate/dim/geom_tol) | `rationale: "r_missing"` | validate |
 | E-SCHEMA-DUP | 種別内重複ID(§1.1。feature/anchorは所属Part内スコープ) | param `wall_t` ×2 / 同一Part内feature `base` ×2 | validate |
 | E-SCHEMA-CYCLE | param間の循環参照(Determined式の依存グラフ) | `a: Determined(param("b"))` + `b: Determined(param("a") + 1.0)` | validate / eval |
@@ -36,8 +36,8 @@
 | E-SCHEMA-UNIT | 単位不整合(単位検証の導入時) | M2以降 |
 | E-ANCHOR-BIND | アンカー再束縛失敗 {anchor_id, feature_id(原因フィーチャー), cause, hint}。causeは Deleted / Untracked / Ambiguous の3値で型固定。Ambiguousは修復ヒント必須。判定規則は docs/provides-predicates.md、実測記録は docs/occt-gotchas.md | **済 (M1-5)** |
 | E-FEATURE-FAIL | OCCT操作失敗 {feature_id, occt_error, hint}。フィレット/面取り(Try+IsDone)・ブーリアン(TryNew)はOCCT例外をruntime_error変換して捕捉(abortゼロ)。プリミティブ寸法はFFI前の正値検証で遮断 | **済 (M1-7)** |
-| E-MATE-UNSOLVED | アセンブリ解決失敗(実行時) | M3-2 |
-| E-MATE-CYCLE | mateグラフの循環・自己参照(**静的検証はM0-2で実装済み**。a=基準側→b=被拘束側の有向グラフ) | 済 / M3 |
+| E-MATE-UNSOLVED | アセンブリ逐次解決の失敗 {mate_id, 原因}。残差>1e-6(先行mateとの矛盾)、参照アンカーの束縛失敗(E-ANCHOR-BINDのAssy経由伝播)、groundから到達不能等。チェッカー文脈ではInconclusive相当 | **済 (M3-2)** |
+| E-MATE-CYCLE | mateグラフの循環・自己参照(a=基準側→b=被拘束側の有向グラフ)。静的検証(M0-2)で検出 | **済** |
 | E-EXPORT | STEP出力失敗(現状はkernel/CLIの構造化メッセージ+exit 2。コード付きJSONへの正式化はM2-1のresults契約と同時) | 実質済 (M1-6) |
 
 ## exit codeとの対応 (07-cli.md)

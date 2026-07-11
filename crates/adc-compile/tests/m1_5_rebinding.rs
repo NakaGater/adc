@@ -47,9 +47,9 @@ fn anchor_area(cp: &CompiledPart, id: &str) -> f64 {
     }
 }
 
-/// 底面(mount_face/datum_a)の面積: 80x60 − φ55 − φ6.6×4
+/// 底面(mount_face/datum_a)の面積: 80x64 − φ55 − φ6.6×4
 fn mount_area() -> f64 {
-    80.0 * 60.0 - PI * R_BORE * R_BORE - 4.0 * PI * R_BOLT * R_BOLT
+    80.0 * 64.0 - PI * R_BORE * R_BORE - 4.0 * PI * R_BOLT * R_BOLT
 }
 
 // ================================================================ 1. パラメータ変更

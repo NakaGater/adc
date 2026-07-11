@@ -47,6 +47,7 @@ fn assy(mates: &str) -> String {
         r#"assembly: Assembly(id: "assy", instances: [
         Instance(id: "i1", part: "p1"),
         Instance(id: "i2", part: "p2"),
+        Instance(id: "i3", part: "p2"),
     ], mates: [{mates}], ground: "i1"),
     assertions: [],"#
     );
@@ -306,14 +307,14 @@ fn mate_dag() {
         (
             "mate_cycle_pair",
             assy(
-                r#"Mate(id: "m1", kind: Coaxial, a: "i1.a", b: "i2.a", rationale: "r0"),
-                   Mate(id: "m2", kind: Coincident, a: "i2.a", b: "i1.a", rationale: "r0")"#,
+                r#"Mate(id: "m1", kind: Coaxial, a: "i2.a", b: "i3.a", rationale: "r0"),
+                   Mate(id: "m2", kind: Coincident, a: "i3.a", b: "i2.a", rationale: "r0")"#,
             ),
             vec![MateCycle],
         ),
         (
             "mate_self_reference",
-            assy(r#"Mate(id: "m1", kind: Coincident, a: "i1.a", b: "i1.a", rationale: "r0")"#),
+            assy(r#"Mate(id: "m1", kind: Coincident, a: "i2.a", b: "i2.a", rationale: "r0")"#),
             vec![MateCycle],
         ),
         (

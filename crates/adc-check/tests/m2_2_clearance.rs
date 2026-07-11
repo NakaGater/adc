@@ -108,7 +108,8 @@ fn no_interference_pass_and_fail_with_overlap_volume() {
     );
     assert!(r.margin < 0.0);
     let ev = &r.evidence[0];
-    assert_eq!(ev.anchors, vec!["bracket".to_string(), "shaft".to_string()]);
+    // M3以降、干渉マップの帰属はインスタンスID
+    assert_eq!(ev.anchors, vec!["bracket_i".to_string(), "shaft_i".to_string()]);
     assert!(ev.note.contains("交差体積"), "{}", ev.note);
 }
 
@@ -143,4 +144,46 @@ fn clearance_results_are_deterministic_bytes() {
     let j1 = adc_check::to_jsonl(&run_checks(&d, &EvalContext::nominal()));
     let j2 = adc_check::to_jsonl(&run_checks(&d, &EvalContext::nominal()));
     assert_eq!(j1, j2);
+}
+
+#[test]
+fn clearance_penetration_reports_negative_measured() {
+    // シャフトを1.5mmオフセット(φ56、中心(41.5,30)) → ボア壁と面が交差
+    let src = r#"Design(
+    schema_version: "0.1",
+    intent: "penetration fixture",
+    params: [],
+    materials: [Material(id: "a5052", density_g_cm3: 2.68, name: "A5052")],
+    parts: [
+        Part(id: "bracket", material: "a5052", process: Machining,
+            features: [
+                Block(id: "base", x: 80.0, y: 60.0, z: 4.0),
+                Hole(id: "bore", kind: Simple, d: 55.0, depth: Through,
+                     at: on(feature("base").face("top"), center())),
+            ],
+            anchors: [Anchor(id: "bearing_bore", kind: Face, binding: feature("bore").face("wall"))]),
+        Part(id: "shaft", material: "a5052", process: Machining,
+            features: [Cylinder(id: "body", d: 56.0, h: 20.0,
+                         at: Offset(from: Origin, d: (41.5, 30.0, -8.0)))],
+            anchors: [Anchor(id: "od", kind: Face, binding: feature("body").face("side"))]),
+    ],
+    assembly: Assembly(id: "assy",
+        instances: [Instance(id: "bracket_i", part: "bracket"), Instance(id: "shaft_i", part: "shaft")],
+        mates: [], ground: "bracket_i"),
+    assertions: [Assertion(id: "a_clear",
+        check: Clearance(a: "bracket_i.bearing_bore", b: "shaft_i.od", min: 1.0), rationale: "r0")],
+    rationales: [Rationale(id: "r0", author: Human("t"), basis: Assumption, note: "", timestamp: "2026-07-12T00:00:00Z")],
+)"#;
+    let d = validate_design(src).unwrap();
+    let rs = run_checks(&d, &EvalContext::nominal());
+    let r = &rs[0];
+    assert!(matches!(r.status, CheckStatus::Fail), "{:?}", r.status);
+    // 交差 → measuredは負の貫入指標(交差体積の立方根)
+    assert!(
+        matches!(r.measured, Value::Scalar(v) if v < 0.0),
+        "負の貫入指標: {:?}",
+        r.measured
+    );
+    assert!(r.margin < -1.0, "貫入はmargin < -1: {}", r.margin);
+    assert!(r.evidence[0].note.contains("貫入"), "{}", r.evidence[0].note);
 }

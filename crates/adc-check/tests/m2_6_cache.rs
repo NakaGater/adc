@@ -73,14 +73,14 @@ fn changed_part_only_recompiles() {
 
     // 1回目: 両部品コンパイル
     let d1 = two_part_design(80.0, 2.5, 0.25);
-    let (_, _, ev1) = run_checks_full(&d1, &ctx, &opts);
+    let (_, _, ev1, _) = run_checks_full(&d1, &ctx, &opts);
     assert_eq!(
         part_events(&ev1),
         vec!["compiled:bracket", "compiled:shaft"]
     );
 
     // 2回目(無変更): 両部品ヒット+結果もヒット
-    let (_, _, ev2) = run_checks_full(&d1, &ctx, &opts);
+    let (_, _, ev2, _) = run_checks_full(&d1, &ctx, &opts);
     assert_eq!(part_events(&ev2), vec!["hit:bracket", "hit:shaft"]);
     assert!(
         ev2.iter().any(|e| matches!(e, CacheEvent::ResultHit(id) if id == "a_clear")),
@@ -91,7 +91,7 @@ fn changed_part_only_recompiles() {
     // bracket_xに依存しないよう同値になる…はならないため、幾何が同じでも
     // 正準形が変わればミスになることも確認できる)
     let d2 = two_part_design(82.0, 2.5, 0.25);
-    let (_, _, ev3) = run_checks_full(&d2, &ctx, &opts);
+    let (_, _, ev3, _) = run_checks_full(&d2, &ctx, &opts);
     let evs = part_events(&ev3);
     assert!(evs.contains(&"compiled:bracket".to_string()), "{evs:?}");
 }
@@ -107,11 +107,11 @@ fn anchor_checkers_work_from_cache_and_bytes_match_no_cache() {
     let d = two_part_design(80.0, 2.5, 0.25);
 
     // --no-cache 相当
-    let (r_none, _, _) = run_checks_full(&d, &ctx, &opts_none);
+    let (r_none, _, _, _) = run_checks_full(&d, &ctx, &opts_none);
     // 1回目(キャッシュ作成)
-    let (r_warm, _, _) = run_checks_full(&d, &ctx, &opts_cache);
+    let (r_warm, _, _, _) = run_checks_full(&d, &ctx, &opts_cache);
     // 2回目(部品+結果ともヒット。Clearanceは束縛表経由のアンカーで動く)
-    let (r_hit, _, ev) = run_checks_full(&d, &ctx, &opts_cache);
+    let (r_hit, _, ev, _) = run_checks_full(&d, &ctx, &opts_cache);
     assert!(
         ev.iter().any(|e| matches!(e, CacheEvent::PartHit(_))),
         "{ev:?}"
@@ -132,16 +132,16 @@ fn sample_density_change_causes_result_cache_miss() {
     let ctx = EvalContext::nominal();
 
     let d1 = two_part_design(80.0, 2.5, 0.25);
-    let (_, _, _) = run_checks_full(&d1, &ctx, &opts);
+    let (_, _, _, _) = run_checks_full(&d1, &ctx, &opts);
     // 同一再実行 → b_wall ヒット
-    let (_, _, ev) = run_checks_full(&d1, &ctx, &opts);
+    let (_, _, ev, _) = run_checks_full(&d1, &ctx, &opts);
     assert!(
         ev.iter().any(|e| matches!(e, CacheEvent::ResultHit(id) if id == "b_wall")),
         "{ev:?}"
     );
     // sample_density変更 → b_wall は再計算(部品はヒット)
     let d2 = two_part_design(80.0, 2.5, 0.5);
-    let (_, _, ev) = run_checks_full(&d2, &ctx, &opts);
+    let (_, _, ev, _) = run_checks_full(&d2, &ctx, &opts);
     assert!(
         ev.iter().any(|e| matches!(e, CacheEvent::PartHit(id) if id == "bracket")),
         "{ev:?}"

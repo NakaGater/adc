@@ -20,10 +20,11 @@
 //! (エッジのHistory追跡は面より弱いため長期参照で運ばない — 2026-07-12決定)。
 //! 板金(M5)、非ルート配置のBlock(M1-3以降)は未対応。
 
+pub mod assembly;
 mod cache;
 mod frame;
 
-pub use cache::{compile_part_cached, part_cache_key, BindingTable, CacheOutcome};
+pub use cache::{compile_part_cached, part_cache_key, BindingTable, CacheOutcome, CachedBinding};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -740,6 +741,7 @@ fn resolve_edges(
 }
 
 /// profileから工具プリズムを作る。断面はフレーム平面(baseを含むz直交面)、押出は dir×len。
+#[allow(clippy::too_many_arguments)]
 fn profile_tool(
     profile: &Profile,
     frame: &Frame,
@@ -752,7 +754,7 @@ fn profile_tool(
 ) -> Result<Solid, CompileError> {
     match profile {
         Profile::Circ { d } => {
-            let r = e_pos(ev, d, &fid, "d")? / 2.0;
+            let r = e_pos(ev, d, fid, "d")? / 2.0;
             Ok(make_cylinder_dir(base, dir, r, len))
         }
         Profile::Rect { x, y } => {

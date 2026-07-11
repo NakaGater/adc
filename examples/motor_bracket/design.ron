@@ -11,7 +11,7 @@ Design(
     Part(
       id: "bracket", material: "a5052", process: Machining,
       features: [
-        Block(id: "base", x: 80.0, y: 60.0, z: param("wall_t")),
+        Block(id: "base", x: 80.0, y: 64.0, z: param("wall_t")),
         Hole(id: "bore", kind: Simple, d: param("bore_d"), depth: Through,
              at: on(feature("base").face("top"), center())),
         Pattern(id: "bolts", of: Hole(kind: Simple, d: param("bolt_d"), depth: Through),
@@ -32,7 +32,7 @@ Design(
   ],
   rationales: [
     Rationale(id: "r_wall", author: Human("nakag"), basis: Assumption,
-              note: "剛性未評価のため仮置き。DFM検証後に確定", timestamp: "2026-07-11T00:00:00Z"),
+              note: "剛性未評価のため仮置き。DFM検証後に確定。板幅64はφ55ボアとの面内リガメント(64-55)/2=4.5mmを確保する(最小肉厚2.5に対し余裕)", timestamp: "2026-07-11T00:00:00Z"),
     Rationale(id: "r_bore", author: Human("nakag"), basis: Standard("JIS B 1521 深溝玉軸受 6006 外径φ55"), note: "座面はめあいH7を想定", timestamp: "2026-07-11T00:00:00Z"),
     Rationale(id: "r_bolt", author: Human("nakag"), basis: Standard("JIS B 1180 六角ボルト M6"),
               note: "六角ボルト+平ワッシャ想定のためφ6.6ばか穴(座ぐり不要)", timestamp: "2026-07-12T00:00:00Z"),

@@ -201,6 +201,49 @@ impl Solid {
         }
     }
 
+    /// 剛体変換(回転行列 rot + 並進 t、world = rot·local + t)を適用したコピー
+    pub fn transformed(&self, rot: [[f64; 3]; 3], t: [f64; 3]) -> Solid {
+        // 回転行列 → 軸角
+        let trace = rot[0][0] + rot[1][1] + rot[2][2];
+        let cos_a = ((trace - 1.0) / 2.0).clamp(-1.0, 1.0);
+        let angle = cos_a.acos();
+        let rotated = if angle < 1e-12 {
+            // 回転なし
+            Solid {
+                inner: self.inner.translated(dvec3(0.0, 0.0, 0.0)),
+            }
+        } else if (std::f64::consts::PI - angle).abs() < 1e-9 {
+            // 180°: 軸を対角成分から復元
+            let ax = ((rot[0][0] + 1.0) / 2.0).max(0.0).sqrt();
+            let ay = ((rot[1][1] + 1.0) / 2.0).max(0.0).sqrt();
+            let az = ((rot[2][2] + 1.0) / 2.0).max(0.0).sqrt();
+            // 符号は非対角成分から
+            let (ax, ay, az) = if ax >= ay && ax >= az {
+                (ax, rot[0][1] / (2.0 * ax), rot[0][2] / (2.0 * ax))
+            } else if ay >= az {
+                (rot[0][1] / (2.0 * ay), ay, rot[1][2] / (2.0 * ay))
+            } else {
+                (rot[0][2] / (2.0 * az), rot[1][2] / (2.0 * az), az)
+            };
+            Solid {
+                inner: self.inner.rotated(v([ax, ay, az]).normalize(), angle),
+            }
+        } else {
+            let s2 = 2.0 * angle.sin();
+            let axis = [
+                (rot[2][1] - rot[1][2]) / s2,
+                (rot[0][2] - rot[2][0]) / s2,
+                (rot[1][0] - rot[0][1]) / s2,
+            ];
+            Solid {
+                inner: self.inner.rotated(v(axis).normalize(), angle),
+            }
+        };
+        Solid {
+            inner: rotated.inner.translated(v(t)),
+        }
+    }
+
     /// 原点origin・方向dirの直線と全フェイスの交点を、直線パラメータt昇順で返す
     pub fn ray_hits(&self, origin: [f64; 3], dir: [f64; 3]) -> Vec<(f64, [f64; 3])> {
         let mut hits: Vec<(f64, [f64; 3])> = self

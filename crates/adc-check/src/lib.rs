@@ -97,6 +97,53 @@ pub struct CompiledModel {
     pub part_density: BTreeMap<String, Option<f64>>,
     /// part id → Datumアンカーidの列(宣言順)
     pub part_datums: BTreeMap<String, Vec<String>>,
+    /// instance id → mate解決済み剛体変換 (M3。mateなしは恒等)
+    pub placements: BTreeMap<String, adc_compile::assembly::Rigid>,
+    /// instance id → 配置済みソリッド
+    pub instance_solids: BTreeMap<String, adc_kernel::Solid>,
+    /// mate解決失敗 (E-MATE-UNSOLVED) — Assy依存チェックはInconclusiveへ
+    pub assembly_error: Option<String>,
+    /// 残自由度レポート (instance, 残DOF, note) — 報告のみ(M3-2)
+    pub dof_report: Vec<(String, u8, String)>,
+}
+
+impl CompiledModel {
+    /// アンカーの配置済みFace(束縛表インデックス→インスタンスソリッドの面)
+    pub fn placed_anchor_face(
+        &self,
+        instance: &str,
+        anchor: &str,
+    ) -> Result<adc_kernel::FaceHandle, String> {
+        let part = self
+            .instances
+            .iter()
+            .find(|(i, _)| i == instance)
+            .map(|(_, p)| p.clone())
+            .ok_or_else(|| format!("インスタンス \"{instance}\" が存在しません"))?;
+        let cp = self
+            .parts
+            .get(&part)
+            .ok_or_else(|| format!("part \"{part}\" のコンパイルに失敗しています"))?;
+        let table = cp.binding_table().map_err(|e| e.to_string())?;
+        let index = match table.anchors.get(anchor) {
+            Some(adc_compile::CachedBinding::Face { index }) => *index,
+            Some(_) => {
+                return Err(format!(
+                    "アンカー \"{instance}.{anchor}\" はFace束縛ではありません"
+                ))
+            }
+            None => return Err(format!("アンカー \"{anchor}\" が存在しません")),
+        };
+        let solid = self
+            .instance_solids
+            .get(instance)
+            .ok_or_else(|| format!("インスタンス \"{instance}\" が未配置です"))?;
+        solid
+            .faces()
+            .into_iter()
+            .nth(index)
+            .ok_or_else(|| "束縛表インデックスが範囲外".to_string())
+    }
 }
 
 /// キャッシュ設定 (M2-6)。cache_dir=Noneでキャッシュ無効(--no-cache)。
@@ -170,6 +217,30 @@ pub fn compile_model_with(
                 .collect(),
         );
     }
+    let mut placements = BTreeMap::new();
+    let mut instance_solids = BTreeMap::new();
+    let mut assembly_error = None;
+    let mut dof_report = Vec::new();
+    if design.assembly.is_some() {
+        match Evaluator::new(design, ctx) {
+            Err(e) => assembly_error = Some(e.to_string()),
+            Ok(ev) => match adc_compile::assembly::solve_assembly(design, &parts, &ev) {
+                Err(e) => assembly_error = Some(e.to_string()),
+                Ok(solved) => {
+                    for si in solved.instances {
+                        if let Some(cp) = parts.get(&si.part) {
+                            instance_solids.insert(
+                                si.instance.clone(),
+                                cp.solid.transformed(si.transform.rot, si.transform.t),
+                            );
+                        }
+                        dof_report.push((si.instance.clone(), si.remaining_dof, si.dof_note));
+                        placements.insert(si.instance, si.transform);
+                    }
+                }
+            },
+        }
+    }
     (
         CompiledModel {
             parts,
@@ -177,6 +248,10 @@ pub fn compile_model_with(
             instances,
             part_density,
             part_datums,
+            placements,
+            instance_solids,
+            assembly_error,
+            dof_report,
         },
         events,
     )
@@ -233,6 +308,17 @@ fn result_cache_key(
 ) -> Option<String> {
     let a_ron = ron::ser::to_string(a).ok()?;
     let mut src = format!("adcres:{}|{}", env!("CARGO_PKG_VERSION"), a_ron);
+    // Assy依存チェックは配置(mate)にも依存する
+    let assembly_dependent = matches!(
+        &a.check,
+        Check::NoInterference { .. } | Check::Cog { .. }
+    ) || matches!(&a.check, Check::Clearance { a, b, .. }
+        if matches!(a, GeomRef::Anchor(_)) || matches!(b, GeomRef::Anchor(_)));
+    if assembly_dependent {
+        if let Some(assy) = &design.assembly {
+            src.push_str(&format!("|assy:{}", ron::ser::to_string(assy).ok()?));
+        }
+    }
     for p in parts {
         let key = part_cache_key(design, p, ev).ok()?;
         src.push_str(&format!("|part:{p}={key}"));
@@ -271,17 +357,22 @@ pub fn run_checks_with_timings(
     design: &Design,
     ctx: &EvalContext,
 ) -> (Vec<CheckResult>, Vec<(String, f64)>) {
-    let (r, t, _) = run_checks_full(design, ctx, &CheckOptions::default());
+    let (r, t, _, _) = run_checks_full(design, ctx, &CheckOptions::default());
     (r, t)
 }
 
+/// `run_checks_full` の戻り値: (結果列, タイミング, キャッシュイベント, 残自由度レポート)。
+/// 残自由度は (instance_id, 残DOF数, 内訳note) — M3-2、未拘束は正常で報告のみ。
+pub type FullRunOutput = (
+    Vec<CheckResult>,
+    Vec<(String, f64)>,
+    Vec<CacheEvent>,
+    Vec<(String, u8, String)>,
+);
+
 /// キャッシュ・タイミング・イベント付きのフル実行 (M2-6)。
 /// 計測はチェッカーの外側で行う(チェッカー自体は時刻に依存しない — ADR-003)。
-pub fn run_checks_full(
-    design: &Design,
-    ctx: &EvalContext,
-    opts: &CheckOptions,
-) -> (Vec<CheckResult>, Vec<(String, f64)>, Vec<CacheEvent>) {
+pub fn run_checks_full(design: &Design, ctx: &EvalContext, opts: &CheckOptions) -> FullRunOutput {
     let (model, mut events) = compile_model_with(design, ctx, opts);
     let ev = match Evaluator::new(design, ctx) {
         Ok(ev) => ev,
@@ -294,7 +385,7 @@ pub fn run_checks_full(
                 })
                 .collect();
             rs.sort_by(|x, y| x.assert_id.cmp(&y.assert_id));
-            return (rs, vec![], events);
+            return (rs, vec![], events, model.dof_report.clone());
         }
     };
     let mut results = Vec::new();
@@ -348,7 +439,7 @@ pub fn run_checks_full(
     }
     results.sort_by(|x, y| x.assert_id.cmp(&y.assert_id));
     timings.sort_by(|x, y| x.0.cmp(&y.0));
-    (results, timings, events)
+    (results, timings, events, model.dof_report.clone())
 }
 
 /// results.jsonl の正準テキスト(1行1結果、決定的)

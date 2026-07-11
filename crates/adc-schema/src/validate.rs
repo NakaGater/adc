@@ -677,8 +677,60 @@ fn validate(design: &Design, src: &str) -> Vec<ValidationError> {
                 vec![assy.ground.to_string()],
             );
         }
+        // M3-1優先規則: mateで位置決めされる非ground部品に、部品ルートの
+        // グローバル配置(Offset)を併用することは静的エラー。
+        // mateを持たないOffset配置インスタンスは許容(事実上の固定配置)
+        for inst in &assy.instances {
+            if inst.id == assy.ground {
+                continue;
+            }
+            let constrained = assy.mates.iter().any(|m| m.b.instance == inst.id);
+            if !constrained {
+                continue;
+            }
+            let Some(part) = design.parts.iter().find(|p| p.id == inst.part) else {
+                continue;
+            };
+            let root_global_offset = matches!(
+                part.features.first(),
+                Some(
+                    Feature::Block {
+                        at: Some(Placement::Offset { .. }),
+                        ..
+                    } | Feature::Cylinder {
+                        at: Some(Placement::Offset { .. }),
+                        ..
+                    }
+                )
+            );
+            if root_global_offset {
+                let span = ctx.loc.reference(&inst.id);
+                ctx.push(
+                    ErrorCode::SchemaRef,
+                    format!(
+                        "instance \"{}\": 非ground部品 \"{}\" のグローバル配置(Offset)とmateによる位置決めは併用できません(グローバル配置はground部品のみ)",
+                        inst.id, inst.part
+                    ),
+                    span,
+                    vec![inst.id.clone(), inst.part.clone()],
+                );
+            }
+        }
         for mate in &assy.mates {
             let where_ = format!("mate \"{}\"", mate.id);
+            // groundは被拘束側(b)になれない (ADR-005: a=基準側)
+            if mate.b.instance == assy.ground {
+                let span = ctx.loc.definition(&mate.id, 0);
+                ctx.push(
+                    ErrorCode::SchemaRef,
+                    format!(
+                        "{where_}: ground \"{}\" を被拘束側(b)にはできません",
+                        assy.ground
+                    ),
+                    span,
+                    vec![mate.id.clone(), assy.ground.clone()],
+                );
+            }
             ctx.check_rationale(&mate.rationale, &where_);
             ctx.check_anchor_path(&mate.a, &where_);
             ctx.check_anchor_path(&mate.b, &where_);

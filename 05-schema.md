@@ -160,6 +160,16 @@ struct Mate {
 
 mateの方向規約: `a` が基準側、`b` が被拘束側。instance間の「aに対してbを決める」有向グラフはDAGであること(循環は E-MATE-CYCLE、自己参照も同様)。逐次解決の詳細はADR-005。
 
+- **Distance(d) の符号規約 (M3-1)**: `a` の合わせ面の外向き法線方向に `b` の合わせ面を
+  `d` だけオフセットする。**負値は法線と逆方向**(例: ブラケット上面基準でシャフト
+  基面を板厚側へ食い込ませ、ボアを貫通させる配置は負値で表す)。`Coincident` は
+  Distance(0) と等価な平面合わせ+法線反平行。
+- **配置の優先規則 (M3-1)**: グローバル配置(ルートの `Origin`/`Offset`)が許されるのは
+  ground部品のみ。非ground部品はmateのみで位置決めする。**mateで被拘束かつ
+  グローバル配置を持つ**場合は E-SCHEMA-REF(併用禁止)。mateを持たない部品の
+  グローバル配置は許容(事実上の固定配置)。groundを被拘束側(`b`)にすることも
+  E-SCHEMA-REF。
+
 ## 6. アサーションとチェッカー契約(ADR-003)
 
 ```rust
@@ -261,7 +271,7 @@ Design(
     Part(
       id: "bracket", material: "a5052", process: Machining,
       features: [
-        Block(id: "base", x: 80.0, y: 60.0, z: param("wall_t")),
+        Block(id: "base", x: 80.0, y: 64.0, z: param("wall_t")),
         Hole(id: "bore", kind: Simple, d: param("bore_d"), depth: Through,
              at: on(feature("base").face("top"), center())),
         Pattern(id: "bolts", of: Hole(kind: Simple, d: param("bolt_d"), depth: Through),
@@ -282,7 +292,7 @@ Design(
   ],
   rationales: [
     Rationale(id: "r_wall", author: Human("nakag"), basis: Assumption,
-              note: "剛性未評価のため仮置き。DFM検証後に確定", timestamp: "2026-07-11T00:00:00Z"),
+              note: "剛性未評価のため仮置き。DFM検証後に確定。板幅64はφ55ボアとの面内リガメント(64-55)/2=4.5mmを確保する(最小肉厚2.5に対し余裕)", timestamp: "2026-07-11T00:00:00Z"),
     Rationale(id: "r_bore", author: Human("nakag"), basis: Standard("JIS B 1521 深溝玉軸受 6006 外径φ55"), note: "座面はめあいH7を想定", timestamp: "2026-07-11T00:00:00Z"),
     Rationale(id: "r_bolt", author: Human("nakag"), basis: Standard("JIS B 1180 六角ボルト M6"),
               note: "六角ボルト+平ワッシャ想定のためφ6.6ばか穴(座ぐり不要)", timestamp: "2026-07-12T00:00:00Z"),

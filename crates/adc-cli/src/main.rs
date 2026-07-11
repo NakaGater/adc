@@ -219,8 +219,12 @@ fn check_cmd(args: &[String]) -> Result<ExitCode, String> {
             .map(|d| d.join(".adc").join("cache"))
     };
     let opts = adc_check::CheckOptions { cache_dir };
-    let (mut results, times, events) =
+    let (mut results, times, events, dof) =
         adc_check::run_checks_full(&design, &adc_schema::EvalContext::nominal(), &opts);
+    // 残自由度レポート (M3-2、未拘束=正常・報告のみ) — stderr
+    for (inst, remaining, note) in &dof {
+        eprintln!("dof\t{inst}\t残{remaining}\t{note}");
+    }
     for ev in &events {
         match ev {
             adc_check::CacheEvent::PartHit(id) => eprintln!("cache	part:{id}	hit"),

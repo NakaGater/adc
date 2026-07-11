@@ -24,20 +24,27 @@
 - **対象**: PartRef(ソリッド全体)または Face束縛アンカー(`instance.anchor`)。
   Edge/Axis束縛のアンカーは現状Inconclusive(エッジ由来の帰属はgotcha #2の
   実在検証を経た面providesに限定する方針)
-- **measured / threshold**: スカラー距離 / min
+- **measured / threshold**: スカラー距離 / min。**交差時(最小距離≈0)のmeasuredは
+  負の貫入指標に統一**(2026-07-12決定): 大きさ = 所属ソリッド同士の交差体積の
+  立方根(等価キューブ辺長)。厳密な最小分離距離(MTD)ではない近似指標。
+  接触のみ(交差体積≈0)は 0
 - **margin** = (measured − min) / |min|。min≈0(|min|<1e-12)のときは measured そのもの
-- **Evidence(Pass/Failとも)**: anchors=[参照ラベルa, b]、points=[最近接点1, 最近接点2]
+- **Evidence(Pass/Failとも)**: anchors=[参照ラベルa, b]、points=[最近接点1, 最近接点2]。
+  貫入時はnoteに「貫入」と貫入指標を明記
 
-## no_interference (M2-2)
+## no_interference (M2-2 / M3-3で干渉マップ化)
 
 - **判定**: 対象ペアのブーリアン積の体積 ≤ 1e-9 mm³
-- **対象ペア**: scope=All → Assyの全インスタンスペア / Pairs → 明示部品ペア。
-  ペアが空(単部品・Assyなし)は **Inconclusive「対象ペアなし」**(単部品内は対象外)
+- **対象ペア**: scope=All → Assyの全インスタンスペア / Pairs → 明示インスタンスペア。
+  ペアが空(単部品・Assyなし)は **Inconclusive「対象ペアなし」**(単部品内は対象外)。
+  ペア列挙は **instance id昇順に正準化**(宣言順非依存 — M3受入で固定)
 - **measured / threshold**: 交差体積合計 / 0
 - **margin**: Fail = −max_pair(交差体積 / min(体積a, 体積b))(最悪ペアの体積比)/
   Pass = min_pair(最小距離) / 全体AABB対角(スケール正規化した余裕)
-- **Evidence(Failのペアごと)**: anchors=[part_a, part_b]、points=[交差部の体積重心]、
-  note=交差体積
+- **Evidence(干渉マップ、M3-3)**: **全ペアを一覧で載せる**。ラベルは
+  anchors=[instance_a, instance_b]。交差ペアは points=[交差部の体積重心]、
+  note=「交差体積 X mm^3」。非交差ペアは note=「最小距離 X(非干渉)」で
+  margin相当の余裕を個別に読める(修復ループがどのペアが危ないかを特定する材料)
 
 ## mass (M2-3)
 
@@ -84,6 +91,25 @@
 
 OCCTのBnd_Boxは既定でgap(1e-7)を含む — kernelで除去済みのため、
 量子化(1e-9)後の実測寸法は正確な設計寸法に一致する(occt-gotchas.md)。
+
+## アセンブリ解決との関係 (M3)
+
+- **mate逐次解決 (M3-1)**: ground を根とする mate グラフ(a→b 有向)を Kahn 位相ソート
+  (同順位は instance id 昇順タイブレーク)し、各インスタンスの mate 列を宣言順に
+  逐次適用 → 最後に全 mate の残差を検証(> 1e-6 で E-MATE-UNSOLVED
+  {mate_id, 原因}、逐次適用で先行mateが壊れた場合はそのmate idを報告)
+- **チェッカーへの影響**: Assy 解決に失敗した設計では、配置に依存するチェッカー
+  (clearance のインスタンスアンカー参照 / no_interference / cog)は
+  **Inconclusive{E-MATE-UNSOLVED...}**。部品コンパイル失敗(E-ANCHOR-BIND 等)も
+  Assy 経由で同様に伝播する(M3-4)
+- **アンカーの配置**: `instance.anchor` 参照は、部品ローカルの束縛表(Face index)を
+  解決済み剛体変換で配置した面として測る。部品を変更して再 build しても、
+  アンカーが生きていれば mate は再束縛される(M3-4受入)
+- **残自由度レポート (M3-2)**: mate種別ごとの近似計上
+  (Coaxial=−4 / Coincident=−3 / Distance=−3 / Angle=−1)で各インスタンスの
+  残DOFを報告する。**未拘束・部分拘束は正常**(構想段階のモデルを許容)で
+  エラーにせず、`--timings` 同様 stderr 側に `dof\t{instance}\t残N\t内訳` で出す。
+  厳密な瞬間自由度解析(ヤコビアン階数)ではない近似である旨は出力noteにも明記
 
 ## キャッシュとの関係 (M2-6)
 
