@@ -1,0 +1,9 @@
+[package]
+name = "adc-compile"
+version.workspace = true
+edition.workspace = true
+description = "フィーチャー→B-repコンパイル、provides台帳、アンカー束縛 (OCCT非依存 — adc-kernel経由)"
+
+[dependencies]
+adc-schema = { path = "../adc-schema" }
+adc-kernel = { path = "../adc-kernel" }

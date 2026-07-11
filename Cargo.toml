@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/adc-schema", "crates/adc-cli", "crates/adc-kernel"]
+members = [
+    "crates/adc-schema",
+    "crates/adc-cli",
+    "crates/adc-kernel",
+    "crates/adc-compile",
+]
 
 [workspace.package]
 version = "0.1.0"
