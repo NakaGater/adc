@@ -56,6 +56,8 @@
 - 上流のPR受け入れ実績から、履歴追跡・DistShapeShapeは汎用性が高く上流還元しやすい。PMI/XDEは大きいのでfork内先行→分割PRが現実的。
 - crates.io公開が止まっているため、Cargo.tomlは `git = "..."`(自forkのURL+rev固定)または vendor ディレクトリ参照とする。
 - LGPL-2.1のため、ADC本体を非LGPLにする場合は adc-kernel の静的リンク形態に注意(再リンク可能なオブジェクト提供義務等)。fork自体はLGPL維持で問題なし。
+- **OCCTはLGPL-2.1+例外条項(OCCT LGPL Exception)。将来ADCのバイナリを配布する際はライセンス表記義務がある**(同梱ライセンス文書・帰属表示。静的リンク時は上記の再リンク可能性にも留意)。
+- **fork対象はopencascade-rsのcxxブリッジ層(crates/opencascade-sys + crates/opencascade)。occt-sysはcrates.io依存として維持する**(OCCT 7.8.1のvendor+cmakeビルドはocct-sys側の責務であり、ADCの追加FFIはブリッジ層で完結する。実測でも依存解決はcrates.ioのocct-sys v0.6.0が使われることを確認済み)。
 
 ## 4. devcontainer方針(OCCTプリビルド)
 

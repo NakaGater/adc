@@ -21,6 +21,13 @@ struct Design {
 
 `dims` / `geom_tols` は省略時空配列。Partは幾何の定義(features/anchors)に純化し、制約系(公差・アサーション)は全てDesign直下に集約する。
 
+### 1.1 IDの名前空間規則(2026-07-11決定)
+
+- IDは**種別**(param / part / anchor / feature / assertion / rationale / mate / instance / material / dim)**内で一意**。種別が異なれば同名を許す
+- ただし **feature / anchor の一意性スコープは所属Part内**とする(部品を跨ぐアンカー参照は常に `instance.anchor` で修飾されるため。複数の部品が同名の `mount_face` アンカーを持つことは正当)
+- `adc explain <id>` は全種別を横断検索し、複数ヒット時(種別間の同名、または部品間の同名feature/anchor)は候補一覧を返す
+- 種別内重複は静的検証エラー E-SCHEMA-DUP(§8)
+
 ## 2. パラメータ(ADR-004)
 
 ```rust
@@ -32,12 +39,12 @@ struct Param {
 }
 
 enum ParamValue {
-  Determined(f64),
-  Open { range: (f64, f64), nominal: f64 },  // nominal ∈ range
+  Determined(Expr),              // リテラルまたは導出式(他paramの参照可)
+  Open { range: (f64, f64), nominal: f64 },  // nominal ∈ range (E-SCHEMA-RANGE)
 }
 ```
 
-数値を書ける全ての場所は `Expr` を受け付ける: リテラル / `param(id)` / 四則演算。循環参照は静的検証でエラー(E-SCHEMA-CYCLE)。
+数値を書ける全ての場所は `Expr` を受け付ける: リテラル / `param(id)` / 四則演算。`Determined` も式を許す(導出パラメータ)。param間の循環参照は静的検証でエラー(E-SCHEMA-CYCLE)。`Open` の range / nominal は探索境界であり式を許さない(リテラル固定)。
 
 ## 3. Rationale
 
@@ -137,11 +144,13 @@ struct Assembly {
 struct Mate {
   id: MateId,
   kind: MateKind,                // Coaxial | Coincident | Distance(Expr) | Angle(Expr)
-  a: AnchorPath,                 // instance.anchor
-  b: AnchorPath,
+  a: AnchorPath,                 // instance.anchor — 基準側(先行部品)
+  b: AnchorPath,                 // 被拘束側(aに対して位置決めされる)
   rationale: RationaleId,
 }
 ```
+
+mateの方向規約: `a` が基準側、`b` が被拘束側。instance間の「aに対してbを決める」有向グラフはDAGであること(循環は E-MATE-CYCLE、自己参照も同様)。逐次解決の詳細はADR-005。
 
 ## 6. アサーションとチェッカー契約(ADR-003)
 
@@ -221,13 +230,13 @@ MVPでのGeomTolは(1)静的検証(データム参照の妥当性=DatumValidity)
 
 | コード | 意味 |
 |---|---|
-| E-SCHEMA-PARSE / -REF / -UNIT / -CYCLE / -RATIONALE | 静的検証エラー |
+| E-SCHEMA-PARSE / -REF / -UNIT / -CYCLE / -RATIONALE / -DUP / -RANGE | 静的検証エラー(-DUP: 種別内重複ID、-RANGE: Open範囲の不整合) |
 | E-ANCHOR-BIND | アンカー再束縛失敗 {anchor_id, feature_id, cause} |
 | E-FEATURE-FAIL | OCCT操作失敗 {feature_id, occt_error, hint} |
-| E-MATE-UNSOLVED / -CYCLE | アセンブリ解決失敗 |
+| E-MATE-UNSOLVED / -CYCLE | アセンブリ解決失敗(-CYCLEは静的検証でも検出) |
 | E-EXPORT | STEP出力失敗 |
 
-全エラーはJSONで構造化出力可能であること(エージェント修復ループの入力)。
+全エラーはJSONで構造化出力可能であること(エージェント修復ループの入力)。静的検証エラーの構造化形式は `{code, message, span(行番号), related(関連ID一覧)}`(2026-07-11決定)。
 
 ## 9. 最小サンプル
 

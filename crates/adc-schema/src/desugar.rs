@@ -788,6 +788,16 @@ mod tests {
     }
 
     #[test]
+    fn string_literals_are_never_rewritten() {
+        // rationaleのnote等の文字列内に糖衣風のテキストがあっても誤リライトしない
+        let src = r#"Rationale(
+    id: "r0", author: Human("test"), basis: Assumption,
+    note: "配置は on(feature(\"base\").face(\"top\"), center()) とし、壁厚は param(\"wall_t\") * 2 + 1 で導出した。edges_of(...) は使わない",
+    timestamp: "2026-07-11T00:00:00Z")"#;
+        assert_eq!(desugar(src).unwrap(), src);
+    }
+
+    #[test]
     fn expr_dsl_roundtrips_tree_structure() {
         // a * (b / 2) と (a * b) / 2 を区別して往復できること
         let e1 = Expr::Mul(
