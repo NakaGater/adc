@@ -289,7 +289,7 @@ Design(
   schema_version: "0.1",
   intent: "モーターマウントブラケット: M6x4でフレームに締結、6006ベアリング(外径φ55)の座面を保持",
   params: [
-    Param(id: "wall_t", value: Open(range: (2.0, 6.0), nominal: 4.0), unit: Mm, rationale: "r_wall"),
+    Param(id: "wall_t", value: Open(range: (2.2, 6.0), nominal: 4.0), unit: Mm, rationale: "r_wall"),
     Param(id: "bore_d", value: Determined(55.0), unit: Mm, rationale: "r_bore"),
     Param(id: "bolt_d", value: Determined(6.6), unit: Mm, rationale: "r_bolt"),
   ],
