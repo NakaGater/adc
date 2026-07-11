@@ -95,3 +95,113 @@ impl fmt::Display for ValidationError {
         Ok(())
     }
 }
+
+/// E-ANCHOR-BIND の原因。3値で固定(2026-07-12設計レビュー決定)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum AnchorBindCause {
+    /// 参照先の部分形状が後続フィーチャーの操作で消滅した (IsRemoved)
+    Deleted,
+    /// OCCT History が対応を追跡できなかった(既知の穴 — ADR-002)。
+    /// Modified/Generated とも空だが結果に元形状が残っていない場合
+    Untracked,
+    /// 対応が一意でない(分割等で複数の部分形状に対応)。
+    /// 1対1のみを束縛として許容する(2026-07-12決定・案1)
+    Ambiguous,
+}
+
+/// E-ANCHOR-BIND: アンカー再束縛失敗 (05-schema.md §8, ADR-001)。
+/// 黙って壊れる状態遷移を排除するための明示的コンパイルエラー。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AnchorBindError {
+    pub anchor_id: String,
+    /// 束縛を壊した原因フィーチャー
+    pub feature_id: String,
+    pub cause: AnchorBindCause,
+    pub message: String,
+    /// 修復ヒント(Ambiguous では必須: より特定的な面への貼り直し等)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+impl AnchorBindError {
+    pub fn deleted(anchor_id: impl Into<String>, feature_id: impl Into<String>) -> Self {
+        let (anchor_id, feature_id) = (anchor_id.into(), feature_id.into());
+        Self {
+            message: format!(
+                "アンカー \"{anchor_id}\" の参照先形状はフィーチャー \"{feature_id}\" の操作で消滅しました"
+            ),
+            anchor_id,
+            feature_id,
+            cause: AnchorBindCause::Deleted,
+            hint: Some("参照先のprovides要素を、操作後も残る面に変更するか、原因フィーチャーの定義を見直してください".into()),
+        }
+    }
+
+    pub fn untracked(anchor_id: impl Into<String>, feature_id: impl Into<String>) -> Self {
+        let (anchor_id, feature_id) = (anchor_id.into(), feature_id.into());
+        Self {
+            message: format!(
+                "アンカー \"{anchor_id}\" の対応をフィーチャー \"{feature_id}\" の操作を跨いで追跡できませんでした(OCCT Historyの既知の制約)"
+            ),
+            anchor_id,
+            feature_id,
+            cause: AnchorBindCause::Untracked,
+            hint: Some("追跡可能な別のprovides要素へアンカーを貼り直してください".into()),
+        }
+    }
+
+    /// Ambiguous は修復ヒントを必ず含む(2026-07-12決定)
+    pub fn ambiguous(
+        anchor_id: impl Into<String>,
+        feature_id: impl Into<String>,
+        candidates: usize,
+    ) -> Self {
+        let (anchor_id, feature_id) = (anchor_id.into(), feature_id.into());
+        Self {
+            message: format!(
+                "アンカー \"{anchor_id}\" の参照先はフィーチャー \"{feature_id}\" の操作で{candidates}個の面に分割され、一意に対応しません"
+            ),
+            anchor_id,
+            feature_id,
+            cause: AnchorBindCause::Ambiguous,
+            hint: Some(format!(
+                "分割後のいずれか1面を特定できる、より特定的なprovides要素へアンカーを貼り直してください(候補{candidates}面)。分割を意図しない場合は原因フィーチャーの配置・寸法を見直してください"
+            )),
+        }
+    }
+}
+
+impl fmt::Display for AnchorBindError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "E-ANCHOR-BIND: {} (anchor: {}, feature: {}, cause: {:?})",
+            self.message, self.anchor_id, self.feature_id, self.cause
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anchor_bind_error_is_structured_and_json_serializable() {
+        let e = AnchorBindError::ambiguous("bearing_bore", "pocket1", 2);
+        assert_eq!(e.cause, AnchorBindCause::Ambiguous);
+        assert!(e.hint.as_deref().unwrap().contains("貼り直し"), "{e:?}");
+        let json = serde_json::to_string(&e).unwrap();
+        assert!(json.contains("\"Ambiguous\""), "{json}");
+        assert!(json.contains("\"hint\""), "{json}");
+        assert!(e.to_string().contains("E-ANCHOR-BIND"));
+
+        // 3値のシリアライズ表現
+        for (cause, s) in [
+            (AnchorBindCause::Deleted, "\"Deleted\""),
+            (AnchorBindCause::Untracked, "\"Untracked\""),
+            (AnchorBindCause::Ambiguous, "\"Ambiguous\""),
+        ] {
+            assert_eq!(serde_json::to_string(&cause).unwrap(), s);
+        }
+    }
+}

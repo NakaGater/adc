@@ -5,8 +5,7 @@ edition.workspace = true
 description = "OCCT FFI境界 — 唯一OCCTに触れる層 (ADR-002)"
 
 [dependencies]
-# TEMP: fork (NakaGater/opencascade-rs, branch adc) のGitHub作成後に
-#   opencascade = { git = "https://github.com/NakaGater/opencascade-rs.git", branch = "adc" }
-# へ差し替える(M1-1)。現在はローカルclone(同階層)へのpath依存。
-opencascade = { path = "../../../opencascade-rs/crates/opencascade" }
+# fork: rev固定はCargo.lockが担う (ADR-002 / docs/M1-0-api-coverage.md §6)。
+# ローカルで fork を編集して試すときは workspace の [patch] で path 上書きする
+opencascade = { git = "https://github.com/NakaGater/opencascade-rs.git", branch = "adc" }
 glam = "0.24"
