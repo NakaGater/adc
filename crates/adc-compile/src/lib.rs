@@ -141,7 +141,7 @@ fn forward_face(f: FaceHandle, h: &History, by: &str) -> Provided {
     }
 }
 
-fn forward_entry(entry: Provided, h: &History, by: &str) -> Provided {
+fn forward_entry(entry: Provided, h: &History, by: &str, result: &Solid) -> Provided {
     match entry {
         Provided::Face(f) => forward_face(f, h, by),
         Provided::FaceSet(faces) => {
@@ -163,7 +163,10 @@ fn forward_entry(entry: Provided, h: &History, by: &str) -> Provided {
             let mut mapped = h.modified_edges(&e);
             match mapped.len() {
                 0 => {
-                    if h.is_removed_edge(&e) {
+                    // OCCT実測の穴 (docs/occt-gotchas.md): BRepFilletAPI系のHistoryは
+                    // 幾何的に無傷のエッジをIsRemoved=trueと誤報告することがある。
+                    // 結果ソリッド内をIsSameで再走査して実在なら束縛を維持する
+                    if h.is_removed_edge(&e) && !result.edges().iter().any(|x| x.is_same(&e)) {
                         Provided::Deleted {
                             by_feature: by.to_string(),
                         }
@@ -196,7 +199,7 @@ struct State {
 }
 
 impl State {
-    fn forward_all(&mut self, h: &History, by: &str) {
+    fn forward_all(&mut self, h: &History, by: &str, result: &Solid) {
         for entry in self.ledger.values_mut() {
             let old = std::mem::replace(
                 entry,
@@ -204,7 +207,7 @@ impl State {
                     by_feature: String::new(),
                 },
             );
-            *entry = forward_entry(old, h, by);
+            *entry = forward_entry(old, h, by, result);
         }
     }
 
@@ -382,6 +385,19 @@ fn bind_anchor(
 
 fn e(ev: &Evaluator, x: &Expr) -> Result<f64, CompileError> {
     ev.evaluate(x).map_err(CompileError::Eval)
+}
+
+/// 正の寸法値を要求する評価(E-FEATURE-FAILの早期検出 — OCCTのDomainErrorをFFI前に防ぐ)
+fn e_pos(ev: &Evaluator, x: &Expr, fid: &str, what: &str) -> Result<f64, CompileError> {
+    let v = e(ev, x)?;
+    if v <= 0.0 {
+        return Err(CompileError::FeatureFail(FeatureFailError {
+            feature_id: fid.to_string(),
+            occt_error: format!("{what} = {v} は不正です"),
+            hint: Some(format!("{what} は正の値であること")),
+        }));
+    }
+    Ok(v)
 }
 
 fn resolve_placement(
@@ -597,8 +613,18 @@ fn resolve_edges(
     }
     match sel {
         EdgeSelector::EdgesOf(b) => {
+            // 外周ワイヤのみ (2026-07-12決定: §9サンプルの意図=外形の丸め。
+            // 内周ループ=穴リム等は edges_between(wall, face) で選択する)
             let faces = binding_faces(st, b, fid)?;
-            Ok(edges_of_group(&faces))
+            let mut out: Vec<EdgeHandle> = Vec::new();
+            for f in &faces {
+                for e in f.outer_edges() {
+                    if !out.iter().any(|x| x.is_same(&e)) {
+                        out.push(e);
+                    }
+                }
+            }
+            Ok(out)
         }
         EdgeSelector::EdgesBetween(a, b) => {
             let fa = binding_faces(st, a, fid)?;
@@ -626,7 +652,7 @@ fn profile_tool(
 ) -> Result<Solid, CompileError> {
     match profile {
         Profile::Circ { d } => {
-            let r = e(ev, d)? / 2.0;
+            let r = e_pos(ev, d, &fid, "d")? / 2.0;
             Ok(make_cylinder_dir(base, dir, r, len))
         }
         Profile::Rect { x, y } => {
@@ -662,7 +688,11 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
                     what: "2つ目のルートソリッドはM1-3以降".to_string(),
                 });
             }
-            let (dx, dy, dz) = (e(ev, x)?, e(ev, y)?, e(ev, z)?);
+            let (dx, dy, dz) = (
+                e_pos(ev, x, &fid, "x")?,
+                e_pos(ev, y, &fid, "y")?,
+                e_pos(ev, z, &fid, "z")?,
+            );
             let solid = make_box(dx, dy, dz);
             // provides同定 (docs/provides-predicates.md: 法線方向)
             for face in solid.faces() {
@@ -688,8 +718,8 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
 
         Feature::Cylinder { id, d, h, axis, at } => {
             let fid = req_id(id, "Cylinder")?.to_string();
-            let r = e(ev, d)? / 2.0;
-            let hh = e(ev, h)?;
+            let r = e_pos(ev, d, req_id(id, "Cylinder")?, "d")? / 2.0;
+            let hh = e_pos(ev, h, req_id(id, "Cylinder")?, "h")?;
             match (&st.solid, at) {
                 (None, None | Some(Placement::Origin)) => {
                     let dir = axis_dir(axis);
@@ -722,8 +752,14 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
                     let tool = make_cylinder_dir(frame.origin, dir, r, hh);
                     let (side, far, _near) = classify_cylinder_faces(&tool, dir);
                     let solid = st.solid.take().unwrap();
-                    let (result, hist) = solid.fuse_with_history(&tool);
-                    st.forward_all(&hist, &fid);
+                    let (result, hist) = solid.fuse_with_history(&tool).map_err(|occt_error| {
+                CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid.clone(),
+                    occt_error,
+                    hint: Some("付加ブーリアンが失敗しました。工具寸法・配置が対象ソリッドと整合しているか確認してください".into()),
+                })
+            })?;
+                    st.forward_all(&hist, &fid, &result);
                     if let Some(s) = side {
                         st.insert(&fid, "side", forward_face(s, &hist, &fid));
                     }
@@ -791,7 +827,7 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
                     message: "エッジ選択が空です".into(),
                 });
             }
-            let r_v = e(ev, r)?;
+            let r_v = e_pos(ev, r, &fid, "r")?;
             let solid = st.solid.take().ok_or_else(|| CompileError::Geometry {
                 feature_id: fid.clone(),
                 message: "Filletの前にソリッドが必要".into(),
@@ -810,7 +846,7 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
                             )),
                         })
                     })?;
-            st.forward_all(&hist, &fid);
+            st.forward_all(&hist, &fid, &result);
             st.solid = Some(result);
             Ok(())
         }
@@ -824,7 +860,7 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
                     message: "エッジ選択が空です".into(),
                 });
             }
-            let size_v = e(ev, size)?;
+            let size_v = e_pos(ev, size, &fid, "size")?;
             let solid = st.solid.take().ok_or_else(|| CompileError::Geometry {
                 feature_id: fid.clone(),
                 message: "Chamferの前にソリッドが必要".into(),
@@ -842,7 +878,7 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
                         )),
                     })
                 })?;
-            st.forward_all(&hist, &fid);
+            st.forward_all(&hist, &fid, &result);
             st.solid = Some(result);
             Ok(())
         }
@@ -1019,7 +1055,7 @@ fn apply_hole(
     {
             let n = frame.z;
             let drill = scale(n, -1.0); // 掘り込み方向
-            let r = e(ev, d)? / 2.0;
+            let r = e_pos(ev, d, &fid, "d")? / 2.0;
 
             let (bb_min, bb_max) = solid.bounding_box();
             let diag = frame::norm(sub(bb_max, bb_min));
@@ -1088,7 +1124,13 @@ fn apply_hole(
                         cbr,
                         cbdep + 1.0,
                     );
-                    let (fused, tool_hist) = small.fuse_with_history(&cb);
+                    let (fused, tool_hist) = small.fuse_with_history(&cb).map_err(|occt_error| {
+                        CompileError::FeatureFail(FeatureFailError {
+                            feature_id: fid.clone(),
+                            occt_error,
+                            hint: None,
+                        })
+                    })?;
                     let wall = match forward_face(side, &tool_hist, &fid) {
                         Provided::Face(f) => f,
                         _ => {
@@ -1149,7 +1191,13 @@ fn apply_hole(
                     let cone_base = add(frame.origin, scale(n, 0.5));
                     let r_at_base = cs_r + 0.5 * half.tan();
                     let cone = make_cone_dir(cone_base, drill, r_at_base, r, t_cs + 0.5);
-                    let (fused, tool_hist) = small.fuse_with_history(&cone);
+                    let (fused, tool_hist) = small.fuse_with_history(&cone).map_err(|occt_error| {
+                        CompileError::FeatureFail(FeatureFailError {
+                            feature_id: fid.clone(),
+                            occt_error,
+                            hint: None,
+                        })
+                    })?;
                     let wall = match forward_face(side, &tool_hist, &fid) {
                         Provided::Face(f) => f,
                         _ => {
@@ -1167,8 +1215,14 @@ fn apply_hole(
                 }
             };
 
-            let (result, hist) = solid.cut_with_history(&tool);
-            st.forward_all(&hist, &fid);
+            let (result, hist) = solid.cut_with_history(&tool).map_err(|occt_error| {
+                CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid.clone(),
+                    occt_error,
+                    hint: Some("切削ブーリアンが失敗しました。工具寸法・配置が対象ソリッドと整合しているか確認してください".into()),
+                })
+            })?;
+            st.forward_all(&hist, &fid, &result);
 
             let wall = forward_face(wall_src, &hist, &fid);
             // rim: wall面の円エッジのうち配置面に最も近いもの (docs/provides-predicates.md)
@@ -1229,7 +1283,7 @@ fn apply_pocket(
     {
             let n = frame.z;
             let drill = scale(n, -1.0);
-            let dep = e(ev, depth)?;
+            let dep = e_pos(ev, depth, &fid, "depth")?;
             let cr = match corner_r {
                 Some(x) => e(ev, x)?,
                 None => 0.0,
@@ -1238,8 +1292,14 @@ fn apply_pocket(
             let tool = profile_tool(profile, &frame, base, drill, dep + 0.5, cr, ev, &fid)?;
             let (sides, far, _near) = classify_prism_faces(&tool, drill);
 
-            let (result, hist) = solid.cut_with_history(&tool);
-            st.forward_all(&hist, &fid);
+            let (result, hist) = solid.cut_with_history(&tool).map_err(|occt_error| {
+                CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid.clone(),
+                    occt_error,
+                    hint: Some("切削ブーリアンが失敗しました。工具寸法・配置が対象ソリッドと整合しているか確認してください".into()),
+                })
+            })?;
+            st.forward_all(&hist, &fid, &result);
             if let Some(floor) = far {
                 st.insert(&fid, "floor", forward_face(floor, &hist, &fid));
             }
@@ -1277,12 +1337,18 @@ fn apply_boss(
     })?;
     {
             let n = frame.z;
-            let h = e(ev, height)?;
+            let h = e_pos(ev, height, &fid, "height")?;
             let tool = profile_tool(profile, &frame, frame.origin, n, h, 0.0, ev, &fid)?;
             let (sides, far, _near) = classify_prism_faces(&tool, n);
 
-            let (result, hist) = solid.fuse_with_history(&tool);
-            st.forward_all(&hist, &fid);
+            let (result, hist) = solid.fuse_with_history(&tool).map_err(|occt_error| {
+                CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid.clone(),
+                    occt_error,
+                    hint: Some("付加ブーリアンが失敗しました。工具寸法・配置が対象ソリッドと整合しているか確認してください".into()),
+                })
+            })?;
+            st.forward_all(&hist, &fid, &result);
             if let Some(top) = far {
                 st.insert(&fid, "top", forward_face(top, &hist, &fid));
             }

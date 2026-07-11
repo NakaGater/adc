@@ -6,6 +6,8 @@ version = 4
 name = "adc-cli"
 version = "0.1.0"
 dependencies = [
+ "adc-compile",
+ "adc-kernel",
  "adc-schema",
  "serde_json",
 ]
@@ -234,7 +236,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "kicad-parser"
 version = "0.1.0"
-source = "git+https://github.com/NakaGater/opencascade-rs.git?branch=adc#adaf269b244241a849ea2d5a934d37e80506fa2b"
+source = "git+https://github.com/NakaGater/opencascade-rs.git?branch=adc#613f7f3b75571d2098e2d638ae22096487123778"
 dependencies = [
  "sexp",
  "thiserror",
@@ -267,7 +269,7 @@ dependencies = [
 [[package]]
 name = "opencascade"
 version = "0.2.0"
-source = "git+https://github.com/NakaGater/opencascade-rs.git?branch=adc#adaf269b244241a849ea2d5a934d37e80506fa2b"
+source = "git+https://github.com/NakaGater/opencascade-rs.git?branch=adc#613f7f3b75571d2098e2d638ae22096487123778"
 dependencies = [
  "cxx",
  "glam",
@@ -279,7 +281,7 @@ dependencies = [
 [[package]]
 name = "opencascade-sys"
 version = "0.2.0"
-source = "git+https://github.com/NakaGater/opencascade-rs.git?branch=adc#adaf269b244241a849ea2d5a934d37e80506fa2b"
+source = "git+https://github.com/NakaGater/opencascade-rs.git?branch=adc#613f7f3b75571d2098e2d638ae22096487123778"
 dependencies = [
  "cmake",
  "cxx",

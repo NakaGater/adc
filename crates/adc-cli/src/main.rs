@@ -1,8 +1,11 @@
 //! adc CLI (07-cli.md)。stdoutはデータ、stderrはログを厳守する。
 //!
-//! M0-4時点のサブコマンド: `adc explain <id> [--design <path>] [--format=json]`
-//! exit code (explain): 0=一意に解決 / 1=not_found・ambiguous / 2=E-*エラー
-//! (docs/explain-schema.md)
+//! サブコマンド:
+//! - `adc explain <id> [--design <path>] [--format=json]`
+//!   exit: 0=一意に解決 / 1=not_found・ambiguous / 2=E-*エラー (docs/explain-schema.md)
+//! - `adc export --step [--design <path>] [--out <dir>]`(M1-6)
+//!   部品ごとに <out>/<part_id>.step を出力(既定スキーマAP214 — M1-6緩和)。
+//!   exit: 0=成功 / 2=E-*エラー
 
 use std::process::ExitCode;
 
@@ -20,10 +23,11 @@ fn main() -> ExitCode {
 fn run(args: &[String]) -> Result<ExitCode, String> {
     match args.first().map(String::as_str) {
         Some("explain") => explain_cmd(&args[1..]),
+        Some("export") => export_cmd(&args[1..]),
         Some(other) => Err(format!(
-            "未知のサブコマンド: {other}(M0-4時点で使えるのは explain のみ。07-cli.md参照)"
+            "未知のサブコマンド: {other}(使えるのは explain / export。07-cli.md参照)"
         )),
-        None => Err("usage: adc explain <id> [--design <path>] [--format=json]".to_string()),
+        None => Err("usage: adc <explain|export> ...".to_string()),
     }
 }
 
@@ -86,4 +90,56 @@ fn explain_cmd(args: &[String]) -> Result<ExitCode, String> {
             })
         }
     }
+}
+
+
+fn export_cmd(args: &[String]) -> Result<ExitCode, String> {
+    let mut design_path = "./design.ron".to_string();
+    let mut out_dir = "./out".to_string();
+    let mut step = false;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--step" => {
+                step = true;
+                i += 1;
+            }
+            "--design" => {
+                design_path = args
+                    .get(i + 1)
+                    .ok_or("--design にはパスが必要です")?
+                    .clone();
+                i += 2;
+            }
+            "--out" => {
+                out_dir = args.get(i + 1).ok_or("--out にはパスが必要です")?.clone();
+                i += 2;
+            }
+            other => return Err(format!("不明な引数: {other}")),
+        }
+    }
+    if !step {
+        return Err("usage: adc export --step [--design <path>] [--out <dir>]".to_string());
+    }
+
+    let src = std::fs::read_to_string(&design_path)
+        .map_err(|e| format!("{design_path} を読めません: {e}"))?;
+    let design = match adc_schema::validate_design(&src) {
+        Ok(d) => d,
+        Err(errs) => {
+            let json = serde_json::to_string_pretty(&errs).map_err(|e| e.to_string())?;
+            println!("{json}");
+            return Ok(ExitCode::from(2));
+        }
+    };
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("{out_dir}: {e}"))?;
+
+    for part in &design.parts {
+        let cp = adc_compile::compile_part(&design, &part.id, &adc_schema::EvalContext::nominal())
+            .map_err(|e| format!("part \"{}\" のコンパイル失敗: {e}", part.id))?;
+        let path = format!("{out_dir}/{}.step", part.id);
+        cp.solid.write_step(&path).map_err(|e| format!("{path}: {e}"))?;
+        println!("wrote {path}");
+    }
+    Ok(ExitCode::SUCCESS)
 }

@@ -24,6 +24,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libocct-ocaf-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# FreeCADヘッドレス (M1-6 STEPゴールデンテスト用 — scripts/golden-step-check.sh)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    freecad-python3 freecad-common python3 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Rust (stable固定)
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \

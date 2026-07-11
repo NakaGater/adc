@@ -10,4 +10,6 @@ path = "src/main.rs"
 
 [dependencies]
 adc-schema = { path = "../adc-schema" }
+adc-compile = { path = "../adc-compile" }
+adc-kernel = { path = "../adc-kernel" }
 serde_json = { workspace = true }

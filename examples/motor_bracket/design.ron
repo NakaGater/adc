@@ -14,7 +14,8 @@ Design(
         Hole(id: "bore", kind: Simple, d: param("bore_d"), depth: Through,
              at: on(feature("base").face("top"), center())),
         Pattern(id: "bolts", of: Hole(kind: Counterbore, d: 6.6, cb_d: 11.0, cb_depth: 6.5, depth: Through),
-                kind: Linear2D, count: (2,2), pitch: (64.0, 44.0)),
+                kind: Linear2D, count: (2,2), pitch: (64.0, 44.0),
+                at: on(feature("base").face("top"), center())),
         Fillet(id: "f1", edges: edges_of(feature("base").face("top")), r: 2.0),
       ],
       anchors: [

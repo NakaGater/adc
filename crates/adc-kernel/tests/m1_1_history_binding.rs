@@ -34,7 +34,7 @@ fn bore_wall_face_binds_via_history() {
     let (block, tool) = bracket_and_tool();
     let wall_source = tool_side_face(&tool);
 
-    let (result, history) = block.cut_with_history(&tool);
+    let (result, history) = block.cut_with_history(&tool).expect("cut");
 
     // 結果は 6面(直方体) + 1面(穴壁) = 7面
     assert_eq!(result.faces().len(), 7, "Block+貫通穴は7面のはず");
@@ -72,7 +72,7 @@ fn base_top_face_survives_cut_via_history() {
         .find(|f| (f.center()[2] - T).abs() < EPS)
         .expect("ブロック天面(z=板厚)が同定できること");
 
-    let (_result, history) = block.cut_with_history(&tool);
+    let (_result, history) = block.cut_with_history(&tool).expect("cut");
 
     assert!(!history.is_removed_face(&top_before), "天面は消滅しない");
     let mapped = history.modified_faces(&top_before);
@@ -91,7 +91,7 @@ fn history_mapping_is_deterministic() {
     let run = || {
         let (block, tool) = bracket_and_tool();
         let wall_source = tool_side_face(&tool);
-        let (_result, history) = block.cut_with_history(&tool);
+        let (_result, history) = block.cut_with_history(&tool).expect("cut");
         let mapped = history.modified_faces(&wall_source);
         (mapped.len(), mapped[0].area(), mapped[0].center())
     };
@@ -111,7 +111,7 @@ fn unrelated_face_maps_to_nothing_removed_face_reports_removed() {
         .into_iter()
         .find(|f| (f.center()[2] - (T + 1.0)).abs() < EPS)
         .expect("工具上端面");
-    let (_result, history) = block.cut_with_history(&tool);
+    let (_result, history) = block.cut_with_history(&tool).expect("cut");
     assert!(
         history.modified_faces(&tool_top).is_empty(),
         "結果に残らない面のModifiedは空"

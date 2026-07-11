@@ -126,7 +126,7 @@ enum Pos2 {
 | `Boss` | profile, height, at | face: top/side |
 | `Fillet` | edges(EdgeSelector), r | — |
 | `Chamfer` | edges, size | — |
-| `Pattern` | of(FeatureRef), kind(Linear/Linear2D/Circular), count, pitch | 各インスタンスのprovidesに `[i]` 添字(Linear2Dは `[i][j]`) |
+| `Pattern` | of(FeatureRef), kind(Linear/Linear2D/Circular), count, pitch, **at(必須: グリッド中心)** | 各インスタンスのprovidesに `[i]` 添字(Linear2Dは `[i][j]`)。参照は `feature("bolts[0][1]")`。展開規則は docs/provides-predicates.md |
 
 `EdgeSelector` は意味選択のみ: `edges_of(anchor)` / `edges_between(anchor_a, anchor_b)`。幾何ID指定は存在しない。
 
@@ -265,7 +265,8 @@ Design(
         Hole(id: "bore", kind: Simple, d: param("bore_d"), depth: Through,
              at: on(feature("base").face("top"), center())),
         Pattern(id: "bolts", of: Hole(kind: Counterbore, d: 6.6, cb_d: 11.0, cb_depth: 6.5, depth: Through),
-                kind: Linear2D, count: (2,2), pitch: (64.0, 44.0)),
+                kind: Linear2D, count: (2,2), pitch: (64.0, 44.0),
+                at: on(feature("base").face("top"), center())),
         Fillet(id: "f1", edges: edges_of(feature("base").face("top")), r: 2.0),
       ],
       anchors: [

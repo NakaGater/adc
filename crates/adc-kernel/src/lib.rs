@@ -116,25 +116,49 @@ pub fn make_prism(
 
 impl Solid {
     /// ブーリアン差(self - tool)。結果と履歴を返す。
-    pub fn cut_with_history(&self, tool: &Solid) -> (Solid, History) {
-        let (boolean_shape, history) = self.inner.subtract_with_history(&tool.inner);
-        (
+    /// 失敗はOCCT例外を捕捉して構造化メッセージで返す(abortしない)。
+    pub fn cut_with_history(&self, tool: &Solid) -> Result<(Solid, History), String> {
+        let (boolean_shape, history) = self
+            .inner
+            .subtract_with_history(&tool.inner)
+            .map_err(|e| e.to_string())?;
+        Ok((
             Solid {
                 inner: boolean_shape.shape,
             },
             History { inner: history },
-        )
+        ))
     }
 
-    /// ブーリアン和(self + tool)。結果と履歴を返す。
-    pub fn fuse_with_history(&self, tool: &Solid) -> (Solid, History) {
-        let (boolean_shape, history) = self.inner.union_with_history(&tool.inner);
-        (
+    /// ブーリアン和(self + tool)。結果と履歴を返す。失敗はabortせず構造化メッセージ。
+    pub fn fuse_with_history(&self, tool: &Solid) -> Result<(Solid, History), String> {
+        let (boolean_shape, history) = self
+            .inner
+            .union_with_history(&tool.inner)
+            .map_err(|e| e.to_string())?;
+        Ok((
             Solid {
                 inner: boolean_shape.shape,
             },
             History { inner: history },
-        )
+        ))
+    }
+
+    /// 体積 (mm^3)
+    pub fn volume(&self) -> f64 {
+        self.inner.volume()
+    }
+
+    /// STEP出力(既定スキーマ=AP214。AP242切替はInterface_Static露出後 — M1-6緩和)
+    pub fn write_step(&self, path: &str) -> Result<(), String> {
+        self.inner.write_step(path).map_err(|e| e.to_string())
+    }
+
+    /// STEP入力(ゴールデンテスト用)
+    pub fn read_step(path: &str) -> Result<Solid, String> {
+        opencascade::primitives::Shape::read_step(path)
+            .map(|inner| Solid { inner })
+            .map_err(|e| e.to_string())
     }
 
     /// 全ての面
@@ -170,6 +194,14 @@ impl Solid {
             .chamfer_edges_with_history(distance, edges.iter().map(|e| &e.inner))
             .map_err(|e| e.to_string())?;
         Ok((Solid { inner: shape }, History { inner: history }))
+    }
+
+    /// 全てのエッジ
+    pub fn edges(&self) -> Vec<EdgeHandle> {
+        self.inner
+            .edges()
+            .map(|e| EdgeHandle { inner: e })
+            .collect()
     }
 
     /// 軸平行バウンディングボックス (min, max)
@@ -211,9 +243,18 @@ impl FaceHandle {
         [n.x, n.y, n.z]
     }
 
-    /// 面の境界エッジ
+    /// 面の境界エッジ(外周+内周ループの全部)
     pub fn edges(&self) -> Vec<EdgeHandle> {
         self.inner
+            .edges()
+            .map(|e| EdgeHandle { inner: e })
+            .collect()
+    }
+
+    /// 面の外周ワイヤのエッジのみ(内周ループ=穴のリム等を含まない)
+    pub fn outer_edges(&self) -> Vec<EdgeHandle> {
+        self.inner
+            .outer_wire()
             .edges()
             .map(|e| EdgeHandle { inner: e })
             .collect()
