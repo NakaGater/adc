@@ -1,1 +1,3 @@
 /target
+# ビルドキャッシュ(adc check が design.ron 隣に生成 — 06-deployment.md データ生成の局所性)
+.adc/
