@@ -117,8 +117,10 @@ fn spec_sample_parses() {
     );
     assert_eq!(bracket.anchors[2].kind, AnchorKind::Datum('A'));
 
-    // assembly なし
+    // assembly なし、dims/geom_tols は省略時空配列 (05-schema.md §1)
     assert!(d.assembly.is_none());
+    assert!(d.dims.is_empty());
+    assert!(d.geom_tols.is_empty());
 
     // assertions
     assert_eq!(d.assertions.len(), 2);

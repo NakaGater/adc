@@ -4,6 +4,7 @@ use crate::assembly::Assembly;
 use crate::assertion::Assertion;
 use crate::ids::{MaterialId, ParamId, RationaleId};
 use crate::part::Part;
+use crate::tolerance::{Dim, GeomTol};
 
 /// 正典 design.ron のトップレベル (05-schema.md §1)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -17,6 +18,13 @@ pub struct Design {
     pub parts: Vec<Part>,
     #[serde(default)]
     pub assembly: Option<Assembly>,
+    /// 寸法公差 (§7)。公差スタックは部品横断のためAnchorPathで参照できる
+    /// Design直下に置く(省略時は空配列)
+    #[serde(default)]
+    pub dims: Vec<Dim>,
+    /// 幾何公差 (§7)。rationale付き制約としてassertionsと同じ制約レイヤー
+    #[serde(default)]
+    pub geom_tols: Vec<GeomTol>,
     pub assertions: Vec<Assertion>,
     pub rationales: Vec<Rationale>,
 }

@@ -451,6 +451,42 @@ fn kitchen_sink() -> Design {
         ],
         parts: vec![bracket, cover],
         assembly: Some(assembly),
+        dims: vec![
+            Dim {
+                id: "d1".into(),
+                from: ap("bracket_i", "mount_face"),
+                to: ap("cover_i", "top_face"),
+                nominal: lit(12.0),
+                tol: Tol::Sym(0.1),
+                rationale: "r_req".into(),
+            },
+            Dim {
+                id: "d2".into(),
+                from: ap("bracket_i", "bearing_bore"),
+                to: ap("bracket_i", "datum_a"),
+                nominal: par("wall_t"),
+                tol: Tol::Asym {
+                    plus: 0.2,
+                    minus: 0.1,
+                },
+                rationale: "r_std".into(),
+            },
+            Dim {
+                id: "d3".into(),
+                from: ap("bracket_i", "bearing_bore"),
+                to: ap("bracket_i", "bore_axis"),
+                nominal: lit(27.5),
+                tol: Tol::Fit("H7".into()),
+                rationale: "r_std".into(),
+            },
+        ],
+        geom_tols: vec![GeomTol {
+            kind: GeomTolKind::Position,
+            target: ap("bracket_i", "bearing_bore"),
+            datums: vec![ap("bracket_i", "datum_a")],
+            zone: lit(0.05),
+            rationale: "r_std".into(),
+        }],
         assertions,
         rationales: vec![
             rationale("r_assume", Author::Human("nakag".into()), Basis::Assumption),
@@ -737,7 +773,8 @@ fn check_variants_roundtrip() {
 
 #[test]
 fn tolerance_types_roundtrip() {
-    // Dim / GeomTol (05-schema.md §7)。Designへの添付先は仕様未決のため型単体で保証する
+    // Dim / GeomTol (05-schema.md §7)。Designレベルの被覆はkitchen_sinkが担い、
+    // ここでは全バリアントを型単体で保証する
     for tol in [
         Tol::Sym(0.1),
         Tol::Asym {

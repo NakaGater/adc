@@ -4,10 +4,10 @@ use crate::assembly::AnchorPath;
 use crate::expr::Expr;
 use crate::ids::{DimId, RationaleId};
 
-// NOTE: 05-schema.md §7 の Dim / GeomTol は §1 の Design にまだ保持フィールドが
-// 定義されていない(仕様の未決事項 — ToleranceStack1D が DimId を参照するため
-// どこかに置く必要がある)。M0-1 では型定義と round-trip 保証のみ提供し、
-// 添付先はスキーマ仕様の更新とあわせて M0-2 以降で確定する。
+// Dim / GeomTol は Design トップレベルの dims / geom_tols に置く(05-schema.md §1、
+// 2026-07-11決定)。公差スタックは部品横断の寸法連鎖を扱うため AnchorPath で
+// 部品横断参照できる階層が必要であり、公差は幾何の属性ではなく rationale 付き
+// 制約として assertions と同じ制約レイヤーに属するため。
 
 /// 寸法公差 (05-schema.md §7, P1)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

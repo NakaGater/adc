@@ -15,6 +15,7 @@
 mod assembly;
 mod assertion;
 mod design;
+mod desugar;
 mod error;
 mod expr;
 mod ids;
@@ -31,16 +32,28 @@ pub use part::*;
 pub use tolerance::*;
 
 /// design.ron テキストをパースする。
+///
+/// 糖衣(05-schema.md §4.0)は前処理(desugar)で正準RONへ展開してからserdeに渡す。
+/// 展開は行構造を保存するため、エラーの行番号は元テキストと一致する。
+/// Optionフィールドは `implicit_some` 拡張により `Some(...)` を省略できる
+/// (§9サンプルの `at: on(...)` / `cb_d: 11.0` 形)。
 pub fn parse_design(src: &str) -> Result<Design, SchemaError> {
-    ron::de::from_str(src).map_err(|e| SchemaError::Parse {
-        message: e.code.to_string(),
-        line: e.position.line,
-        column: e.position.col,
-    })
+    let desugared = desugar::desugar(src)?;
+    let options = ron::Options::default()
+        .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME);
+    options
+        .from_str(&desugared)
+        .map_err(|e| SchemaError::Parse {
+            message: e.code.to_string(),
+            line: e.position.line,
+            column: e.position.col,
+        })
 }
 
 /// Design を正準RONテキストにシリアライズする(決定的: 同一値 → 同一バイト列)。
 pub fn to_canonical_ron(design: &Design) -> Result<String, SchemaError> {
-    let config = ron::ser::PrettyConfig::new().struct_names(true);
+    let config = ron::ser::PrettyConfig::new()
+        .struct_names(true)
+        .extensions(ron::extensions::Extensions::IMPLICIT_SOME);
     ron::ser::to_string_pretty(design, config).map_err(|e| SchemaError::Serialize(e.to_string()))
 }
