@@ -23,6 +23,8 @@ dependencies = [
  "adc-compile",
  "adc-kernel",
  "adc-schema",
+ "ron",
+ "serde",
  "serde_json",
 ]
 

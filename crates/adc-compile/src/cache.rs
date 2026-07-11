@@ -34,8 +34,9 @@ pub enum CacheOutcome {
     Compiled,
 }
 
-/// Part正準形RONから `param(<id>)` 参照を収集する(DSL文字列表現に現れる)
-fn collect_param_ids(part_ron: &str) -> Vec<String> {
+/// 正準形RONから `param(<id>)` 参照を収集する(DSL文字列表現に現れる)。
+/// Part(部品キャッシュキー)とAssertion(結果キャッシュキー — M4-1)の両方で使う
+pub fn collect_param_ids(part_ron: &str) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
     let mut rest = part_ron;
     while let Some(pos) = rest.find("param(") {

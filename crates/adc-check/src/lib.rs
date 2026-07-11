@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 
 use std::path::PathBuf;
 
-use adc_compile::{compile_part, compile_part_cached, part_cache_key, CacheOutcome, CompiledPart};
-use adc_schema::{Assertion, Check, Design, EvalContext, Evaluator, GeomRef, Scope};
+use adc_compile::{collect_param_ids, compile_part, compile_part_cached, part_cache_key, CacheOutcome, CompiledPart};
+use adc_schema::{Assertion, Check, Design, EvalContext, Evaluator, GeomRef, ParamValue, Scope};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -64,6 +64,20 @@ pub struct CheckResult {
     pub threshold: Value,
     pub margin: f64,
     pub evidence: Vec<Evidence>,
+    /// Open 3点評価の標本別サブ結果 (05-schema.md §6.1, M4-1)。
+    /// 基底Openパラメータの宣言順 × 各軸内 lo→nominal→hi。
+    /// Openなし設計ではフィールド自体を出力しない(M2-1出力とバイト互換)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub samples: Vec<SampleResult>,
+}
+
+/// 3点評価の標本別サブ結果 {param, sample(lo/nominal/hi), status, measured}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SampleResult {
+    pub param: String,
+    pub sample: String,
+    pub status: CheckStatus,
+    pub measured: Value,
 }
 
 impl CheckResult {
@@ -73,6 +87,7 @@ impl CheckResult {
         reason: impl Into<String>,
     ) -> Self {
         CheckResult {
+            samples: Vec::new(),
             assert_id: assert_id.into(),
             checker: checker.into(),
             status: CheckStatus::Inconclusive {
@@ -308,6 +323,11 @@ fn result_cache_key(
 ) -> Option<String> {
     let a_ron = ron::ser::to_string(a).ok()?;
     let mut src = format!("adcres:{}|{}", env!("CARGO_PKG_VERSION"), a_ron);
+    // Assertion正準形は param(<id>) を未解決のまま含むため、解決値を明示的に混ぜる
+    // (Open割当が変わってもAssertion正準形が同じ、を誤ヒットさせない — M4-1)
+    for id in collect_param_ids(&a_ron) {
+        src.push_str(&format!("|p:{id}={:?}", ev.param(&id)));
+    }
     // Assy依存チェックは配置(mate)にも依存する
     let assembly_dependent = matches!(
         &a.check,
@@ -440,6 +460,183 @@ pub fn run_checks_full(design: &Design, ctx: &EvalContext, opts: &CheckOptions) 
     results.sort_by(|x, y| x.assert_id.cmp(&y.assert_id));
     timings.sort_by(|x, y| x.0.cmp(&y.0));
     (results, timings, events, model.dof_report.clone())
+}
+
+/// statusの悪さ(§6.1: Fail > Inconclusive > Pass)
+fn status_rank(s: &CheckStatus) -> u8 {
+    match s {
+        CheckStatus::Fail => 2,
+        CheckStatus::Inconclusive { .. } => 1,
+        CheckStatus::Pass => 0,
+    }
+}
+
+/// Open 3点評価 (M4-1, ADR-004, 05-schema.md §6.1)。
+///
+/// 基底Openパラメータ各軸につき lo/hi(他は公称固定)+全軸共通の公称の標本で
+/// 全アサーションを評価し、アサーションごとに1行へ集約する:
+/// status=全標本の最悪値、samples=標本別サブ結果(宣言順×lo→nominal→hi)、
+/// トップレベルのmeasured/threshold/margin/evidence=代表標本(最悪)のもの。
+/// Openなし設計では公称のみの評価と完全に同一(samplesなし)。
+pub fn run_checks_interval(design: &Design, opts: &CheckOptions) -> FullRunOutput {
+    let (nominal, mut timings, mut events, dof) =
+        run_checks_full(design, &EvalContext::nominal(), opts);
+    // 標本軸 = 基底Openパラメータのみ、宣言順 (M0-3 base_open_params と同一)
+    let axes: Vec<(String, f64, f64)> = design
+        .params
+        .iter()
+        .filter_map(|p| match &p.value {
+            ParamValue::Open { range, .. } => Some((p.id.clone(), range.0, range.1)),
+            _ => None,
+        })
+        .collect();
+    if axes.is_empty() {
+        return (nominal, timings, events, dof);
+    }
+
+    // 各軸の端点評価(1変数ずつ、他は公称固定 — ADR-004)
+    let mut end_runs: Vec<(String, &'static str, Vec<CheckResult>)> = Vec::new();
+    for (p, lo, hi) in &axes {
+        for (kind, v) in [("lo", *lo), ("hi", *hi)] {
+            let ctx = EvalContext::nominal().assign(p.clone(), v);
+            let (rs, t, e, _) = run_checks_full(design, &ctx, opts);
+            timings.extend(t);
+            events.extend(e);
+            end_runs.push((p.clone(), kind, rs));
+        }
+    }
+
+    let mut merged = Vec::with_capacity(nominal.len());
+    for (i, nom) in nominal.iter().enumerate() {
+        // samples: 宣言順 × lo→nominal→hi。nominal(全軸共通の1回の評価)は
+        // 各軸のトリプルに再掲する (§6.1)
+        let mut full: Vec<(&str, &str, &CheckResult)> = Vec::new();
+        for (p, _, _) in &axes {
+            let get = |kind: &str| -> &CheckResult {
+                &end_runs
+                    .iter()
+                    .find(|(rp, k, _)| rp == p && *k == kind)
+                    .expect("端点評価は軸ごとに実行済み")
+                    .2[i]
+            };
+            full.push((p, "lo", get("lo")));
+            full.push((p, "nominal", nom));
+            full.push((p, "hi", get("hi")));
+        }
+        // 代表標本: statusランク降順 → margin昇順 → 配列順 (§6.1)
+        let mut rep = 0usize;
+        for j in 1..full.len() {
+            let (a, b) = (full[rep].2, full[j].2);
+            let (ra, rb) = (status_rank(&a.status), status_rank(&b.status));
+            if rb > ra || (rb == ra && b.margin < a.margin) {
+                rep = j;
+            }
+        }
+        let repr = full[rep].2;
+        merged.push(CheckResult {
+            assert_id: nom.assert_id.clone(),
+            checker: nom.checker.clone(),
+            status: repr.status.clone(),
+            measured: repr.measured.clone(),
+            threshold: repr.threshold.clone(),
+            margin: repr.margin,
+            evidence: repr.evidence.clone(),
+            samples: full
+                .iter()
+                .map(|(p, k, r)| SampleResult {
+                    param: (*p).to_string(),
+                    sample: (*k).to_string(),
+                    status: r.status.clone(),
+                    measured: r.measured.clone(),
+                })
+                .collect(),
+        });
+    }
+    (merged, timings, events, dof)
+}
+
+/// `--narrow` の二分探索反復上限 (ADR-004: デフォルト8)
+const NARROW_MAX_ITERS: u32 = 8;
+
+/// `adc check --narrow` (M4-2, ADR-004)。
+///
+/// 3点評価で**片端Fail**(公称Pass・区間端の一方のみFail)のアサーションに対し、
+/// 当該Open軸を二分探索(反復上限8・中点規則・他パラメータ公称固定)して
+/// 実行可能区間の推定を `suggested_range: <param> ∈ [lo, hi](…)` として
+/// 当該アサーションのevidenceに付加する。探索は固定回数で決定的(バイト再現)。
+/// 推定区間の境界側はPassを実測した標本値を採用する(保証側に丸める)。
+pub fn run_checks_narrow(design: &Design, opts: &CheckOptions) -> FullRunOutput {
+    let (mut results, mut timings, mut events, dof) = run_checks_interval(design, opts);
+    let axes: Vec<(String, f64, f64, f64)> = design
+        .params
+        .iter()
+        .filter_map(|p| match &p.value {
+            ParamValue::Open { range, nominal } => {
+                Some((p.id.clone(), range.0, range.1, *nominal))
+            }
+            _ => None,
+        })
+        .collect();
+    for r in results.iter_mut() {
+        let assert_id = r.assert_id.clone();
+        for (p, lo, hi, nom) in &axes {
+            fn status_of(r: &CheckResult, p: &str, kind: &str) -> Option<CheckStatus> {
+                r.samples
+                    .iter()
+                    .find(|s| s.param == p && s.sample == kind)
+                    .map(|s| s.status.clone())
+            }
+            let (Some(slo), Some(snom), Some(shi)) = (
+                status_of(r, p, "lo"),
+                status_of(r, p, "nominal"),
+                status_of(r, p, "hi"),
+            ) else {
+                continue;
+            };
+            // 片端Failのみ探索 (ADR-004): 公称Passを探索の実行可能側アンカーにする
+            if !matches!(snom, CheckStatus::Pass) {
+                continue;
+            }
+            let lo_fail = matches!(slo, CheckStatus::Fail);
+            let hi_fail = matches!(shi, CheckStatus::Fail);
+            let fail_end = match (lo_fail, hi_fail) {
+                (true, false) => *lo,
+                (false, true) => *hi,
+                _ => continue,
+            };
+            let (mut bad, mut good) = (fail_end, *nom);
+            for _ in 0..NARROW_MAX_ITERS {
+                let mid = 0.5 * (bad + good);
+                let ctx = EvalContext::nominal().assign(p.clone(), mid);
+                let (rs, t, e, _) = run_checks_full(design, &ctx, opts);
+                timings.extend(t);
+                events.extend(e);
+                match rs
+                    .iter()
+                    .find(|x| x.assert_id == assert_id)
+                    .map(|x| x.status.clone())
+                {
+                    Some(CheckStatus::Fail) => bad = mid,
+                    Some(CheckStatus::Pass) => good = mid,
+                    // 中点でInconclusive → 打ち切り(現在のPass側を採用)
+                    _ => break,
+                }
+            }
+            let granularity = (fail_end - *nom).abs() / f64::from(1u32 << NARROW_MAX_ITERS);
+            let (rlo, rhi) = if lo_fail { (good, *hi) } else { (*lo, good) };
+            r.evidence.push(Evidence {
+                anchors: vec![p.clone()],
+                points: vec![],
+                note: format!(
+                    "suggested_range: {p} ∈ [{}, {}](二分探索{NARROW_MAX_ITERS}回、粒度±{}、他パラメータ公称固定)",
+                    q(rlo),
+                    q(rhi),
+                    q(granularity)
+                ),
+            });
+        }
+    }
+    (results, timings, events, dof)
 }
 
 /// results.jsonl の正準テキスト(1行1結果、決定的)

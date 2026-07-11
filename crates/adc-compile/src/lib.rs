@@ -24,7 +24,7 @@ pub mod assembly;
 mod cache;
 mod frame;
 
-pub use cache::{compile_part_cached, part_cache_key, BindingTable, CacheOutcome, CachedBinding};
+pub use cache::{collect_param_ids, compile_part_cached, part_cache_key, BindingTable, CacheOutcome, CachedBinding};
 
 use std::collections::HashMap;
 use std::fmt;

@@ -6,11 +6,19 @@
 //! - `adc export --step [--design <path>] [--out <dir>]`(M1-6)
 //!   部品ごとに <out>/<part_id>.step を出力(既定スキーマAP214 — M1-6緩和)。
 //!   exit: 0=成功 / 2=E-*エラー
-//! - `adc check [--design <path>] [--format=jsonl|text] [--filter <id,..>] [--timings] [--no-cache]`(M2-1/M2-6)
+//! - `adc check [--design <path>] [--format=jsonl|text] [--filter <id,..>] [--timings] [--no-cache] [--narrow]`(M2-1/M2-6/M4)
 //!   stdout=results.jsonl(正準・決定的)またはtext。timingsはstderrのみ。
+//!   Open含み設計は3点評価(M4-1)。--narrowはsuggested_range付加(M4-2)。
 //!   exit: 0=全Pass / 1=Fail≥1 / 2=Inconclusive≥1またはE-*
+//! - `adc diff <rev1> <rev2> [--design <path>] [--format=text|json]`(M4-3)
+//!   制約差分(rationale込み)+param変更+体積差+margin変化表。exit: 0=成功 / 2=E-*
+//! - `adc report [<results.jsonl>]`(M4-4)
+//!   margin一覧のMarkdownテーブル(Fail先頭→margin昇順)。exit: 0=成功 / 2=E-*
 
 use std::process::ExitCode;
+
+mod diff;
+mod report;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -28,10 +36,12 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         Some("explain") => explain_cmd(&args[1..]),
         Some("export") => export_cmd(&args[1..]),
         Some("check") => check_cmd(&args[1..]),
+        Some("diff") => diff::diff_cmd(&args[1..]),
+        Some("report") => report::report_cmd(&args[1..]),
         Some(other) => Err(format!(
-            "未知のサブコマンド: {other}(使えるのは explain / export / check。07-cli.md参照)"
+            "未知のサブコマンド: {other}(使えるのは explain / export / check / diff / report。07-cli.md参照)"
         )),
-        None => Err("usage: adc <explain|export|check> ...".to_string()),
+        None => Err("usage: adc <explain|export|check|diff|report> ...".to_string()),
     }
 }
 
@@ -154,6 +164,7 @@ fn check_cmd(args: &[String]) -> Result<ExitCode, String> {
     let mut filter: Option<Vec<String>> = None;
     let mut timings = false;
     let mut no_cache = false;
+    let mut narrow = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -175,6 +186,10 @@ fn check_cmd(args: &[String]) -> Result<ExitCode, String> {
             }
             "--no-cache" => {
                 no_cache = true;
+                i += 1;
+            }
+            "--narrow" => {
+                narrow = true;
                 i += 1;
             }
             f if f.starts_with("--format") => {
@@ -219,8 +234,13 @@ fn check_cmd(args: &[String]) -> Result<ExitCode, String> {
             .map(|d| d.join(".adc").join("cache"))
     };
     let opts = adc_check::CheckOptions { cache_dir };
-    let (mut results, times, events, dof) =
-        adc_check::run_checks_full(&design, &adc_schema::EvalContext::nominal(), &opts);
+    // Open含み設計は3点評価 (M4-1, ADR-004)。Openなしなら公称のみと同一。
+    // --narrow は片端Failの軸を二分探索し suggested_range を付加 (M4-2)
+    let (mut results, times, events, dof) = if narrow {
+        adc_check::run_checks_narrow(&design, &opts)
+    } else {
+        adc_check::run_checks_interval(&design, &opts)
+    };
     // 残自由度レポート (M3-2、未拘束=正常・報告のみ) — stderr
     for (inst, remaining, note) in &dof {
         eprintln!("dof\t{inst}\t残{remaining}\t{note}");

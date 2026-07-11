@@ -13,4 +13,6 @@ adc-schema = { path = "../adc-schema" }
 adc-compile = { path = "../adc-compile" }
 adc-kernel = { path = "../adc-kernel" }
 adc-check = { path = "../adc-check" }
+serde = { workspace = true }
 serde_json = { workspace = true }
+ron = { workspace = true }

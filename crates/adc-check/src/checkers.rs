@@ -74,6 +74,7 @@ impl Checker for BoundingBoxChecker {
             });
         }
         CheckResult {
+        samples: Vec::new(),
             assert_id: a.id.clone(),
             checker: self.id().to_string(),
             status: if pass {
@@ -198,6 +199,7 @@ impl Checker for ClearanceChecker {
             note,
         }];
         CheckResult {
+        samples: Vec::new(),
             assert_id: a.id.clone(),
             checker: self.id().to_string(),
             status: if pass {
@@ -337,6 +339,7 @@ impl Checker for NoInterferenceChecker {
             }
         };
         CheckResult {
+        samples: Vec::new(),
             assert_id: a.id.clone(),
             checker: self.id().to_string(),
             status: if fail {
@@ -409,6 +412,7 @@ impl Checker for MassChecker {
             });
         }
         CheckResult {
+        samples: Vec::new(),
             assert_id: a.id.clone(),
             checker: self.id().to_string(),
             status: if pass {
@@ -557,6 +561,7 @@ impl Checker for CogChecker {
             },
         }];
         CheckResult {
+        samples: Vec::new(),
             assert_id: a.id.clone(),
             checker: self.id().to_string(),
             status: if pass {
@@ -647,9 +652,23 @@ impl Checker for WallThicknessChecker {
                     let p = add3(c, add3(scale3(u, pu), scale3(v, pv)));
                     // 面の外側0.1mmから内向きに照射
                     let origin = add3(p, scale3(n, 0.1));
-                    let hits = cp.solid.ray_hits(origin, scale3(n, -1.0));
+                    let raw = cp.solid.ray_hits(origin, scale3(n, -1.0));
+                    // 面の継ぎ目(フィレット接線シーム等)をレイが掠めると同一点で
+                    // 二重ヒットし厚み0の偽違反になるため、1e-6以内の連続ヒットを
+                    // 1点に併合する(実§9のフィレット外周で実測 — M4-1)
+                    let mut hits: Vec<(f64, [f64; 3], [f64; 3])> = Vec::with_capacity(raw.len());
+                    for h in raw {
+                        if hits.last().is_none_or(|l| h.0 - l.0 > 1e-6) {
+                            hits.push(h);
+                        }
+                    }
+                    // 対向面条件 (docs/checkers.md): 出口面の法線が入射面の法線と
+                    // 5°以内で(反)平行のときのみ「壁」とみなす。フィレット/面取りの
+                    // ロールオーバーへ抜けるチョードを壁厚違反として誤検出しない
+                    let opposing = hits.len() >= 2
+                        && dot3(normalize3(hits[1].2), n).abs() >= (5.0f64).to_radians().cos();
                     // 最初のヒットがこのサンプル点(t≈0.1)であるレイのみ採用
-                    if hits.len() >= 2 && (hits[0].0 - 0.1).abs() < 1e-3 {
+                    if opposing && (hits[0].0 - 0.1).abs() < 1e-3 {
                         let thick = hits[1].0 - hits[0].0;
                         n_samples += 1;
                         if thick < min_thick {
@@ -696,6 +715,7 @@ impl Checker for WallThicknessChecker {
             },
         }];
         CheckResult {
+        samples: Vec::new(),
             assert_id: a.id.clone(),
             checker: self.id().to_string(),
             status: if pass {
@@ -799,6 +819,7 @@ impl Checker for DatumValidityChecker {
             }]
         };
         CheckResult {
+        samples: Vec::new(),
             assert_id: a.id.clone(),
             checker: self.id().to_string(),
             status: if pass {
@@ -822,6 +843,7 @@ fn fail_datum(
     note: String,
 ) -> CheckResult {
     CheckResult {
+        samples: Vec::new(),
         assert_id: a.id.clone(),
         checker: checker.to_string(),
         status: CheckStatus::Fail,

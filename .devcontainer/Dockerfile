@@ -36,12 +36,14 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --default-toolchain 1.97.0 --profile minimal --component clippy,rustfmt
 
-# OCCT 7.8.1 プリビルド焼き込み: opencascade-rs (rev固定) をwarmupビルド。
-# rev は M1-1 の fork 作成時に fork の rev に差し替えること。
-ARG OPENCASCADE_RS_REV=b6374512949727609335fa8258a25b5c94f426cb
+# OCCT 7.8.1 プリビルド焼き込み: fork (NakaGater/opencascade-rs, branch adc) を
+# warmupビルド。依存指定はワークスペース(crates/adc-kernel/Cargo.toml)と
+# **完全に同一のspec(git+branch)**にすること — specが異なるとcargoが別ソース扱いし
+# 焼き込みが再利用されない。ビルド時点のadc HEADで焼くため、fork更新後は
+# イメージを再ビルドする(古いままでも差分再ビルドが走るだけで壊れない)。
 ENV CARGO_TARGET_DIR=/opt/cargo-target
 RUN mkdir -p /opt/occt-warmup/src && cd /opt/occt-warmup \
-    && printf '[package]\nname = "occt-warmup"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nopencascade = { git = "https://github.com/bschwind/opencascade-rs", rev = "%s" }\n' "$OPENCASCADE_RS_REV" > Cargo.toml \
+    && printf '[package]\nname = "occt-warmup"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nopencascade = { git = "https://github.com/NakaGater/opencascade-rs.git", branch = "adc" }\n' > Cargo.toml \
     && echo 'fn main() {}' > src/main.rs \
     && cargo build --release \
     && chmod -R a+rw /opt/cargo-target "$CARGO_HOME"

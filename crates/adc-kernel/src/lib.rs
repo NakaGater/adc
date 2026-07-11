@@ -245,12 +245,19 @@ impl Solid {
     }
 
     /// 原点origin・方向dirの直線と全フェイスの交点を、直線パラメータt昇順で返す
-    pub fn ray_hits(&self, origin: [f64; 3], dir: [f64; 3]) -> Vec<(f64, [f64; 3])> {
-        let mut hits: Vec<(f64, [f64; 3])> = self
+    pub fn ray_hits(&self, origin: [f64; 3], dir: [f64; 3]) -> Vec<(f64, [f64; 3], [f64; 3])> {
+        let mut hits: Vec<(f64, [f64; 3], [f64; 3])> = self
             .inner
             .faces_along_line(v(origin), v(dir))
             .into_iter()
-            .map(|h| (h.t, [h.point.x, h.point.y, h.point.z]))
+            .map(|h| {
+                let n = h.face.normal_at(h.point);
+                (
+                    h.t,
+                    [h.point.x, h.point.y, h.point.z],
+                    [n.x, n.y, n.z],
+                )
+            })
             .collect();
         hits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
         hits

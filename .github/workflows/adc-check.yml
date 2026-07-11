@@ -1,0 +1,65 @@
+# ADC check CIテンプレート (M4-4, US-27, 07-cli.md / 08-workflows.md)
+#
+# PRごとに design.ron の全検証(adc check)を回し、margin一覧のMarkdown
+# テーブル(adc report)をStep Summaryに出す。実行環境はdevcontainerイメージ
+# (OCCT 7.8.1プリビルド焼き込み — ゴールデン値の数値再現性を保証する唯一の正)。
+#
+# - イメージはGHCRにキャッシュされ、初回のみOCCTソースビルドが走る(30分超)。
+#   2回目以降はキャッシュヒットで数分に短縮される
+# - フォークからのPRはGITHUB_TOKENにpackages:writeがなくGHCR pushに失敗する。
+#   本テンプレートは同一リポジトリ内ブランチのPR運用を想定(06-deployment.md)
+# - このリポジトリ自身では examples/motor_bracket をドッグフーディング検証する。
+#   設計リポジトリに転用する場合は adc-check.sh の DESIGN を差し替えること
+name: adc-check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: GHCRログイン(devcontainerイメージのキャッシュ用)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: イメージ名を小文字化(GHCR要件)
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}-devcontainer" >> "$GITHUB_OUTPUT"
+
+      - name: devcontainer内で build + check + report
+        uses: devcontainers/ci@v0.3
+        with:
+          imageName: ${{ steps.img.outputs.name }}
+          cacheFrom: ${{ steps.img.outputs.name }}
+          push: always
+          runCmd: bash .github/workflows/adc-check.sh
+
+      - name: レポートをStep Summaryへ
+        if: always()
+        run: |
+          if [ -f report.md ]; then
+            cat report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "report.md が生成されていません(ビルド失敗)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: results.jsonl / report.md をアーティファクトに保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adc-results
+          path: |
+            results.jsonl
+            report.md
+          if-no-files-found: ignore

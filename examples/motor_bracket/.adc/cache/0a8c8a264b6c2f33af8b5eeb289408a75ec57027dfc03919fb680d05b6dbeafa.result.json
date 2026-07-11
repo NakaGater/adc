@@ -1,0 +1,1 @@
+{"assert_id":"a_wall","checker":"wall_thickness","status":"pass","measured":3.0,"threshold":2.5,"margin":0.2,"evidence":[{"anchors":["bracket"],"points":[[78.0,62.0,0.0]],"note":"最小実測厚 3(サンプル4488点、密度1点/mm²) ※レイキャスト近似の一方向保証: 検出した違反は真、未検出は薄肉なしを保証しない"}]}
