@@ -35,6 +35,8 @@ pub enum ErrorCode {
     SchemaCycle,
     /// Open範囲の不整合 (nominal ∉ range / min > max)
     SchemaRange,
+    /// 式評価の失敗(ゼロ除算・非有限値)。チェッカー文脈ではInconclusive相当
+    SchemaEval,
     /// mateグラフの循環・自己参照
     MateCycle,
 }
@@ -48,6 +50,7 @@ impl ErrorCode {
             ErrorCode::SchemaDup => "E-SCHEMA-DUP",
             ErrorCode::SchemaCycle => "E-SCHEMA-CYCLE",
             ErrorCode::SchemaRange => "E-SCHEMA-RANGE",
+            ErrorCode::SchemaEval => "E-SCHEMA-EVAL",
             ErrorCode::MateCycle => "E-MATE-CYCLE",
         }
     }

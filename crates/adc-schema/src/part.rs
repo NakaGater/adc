@@ -147,6 +147,26 @@ pub enum Feature {
     },
 }
 
+impl Feature {
+    /// フィーチャーID(インラインフィーチャーはNoneを許容 — 05-schema.md §4)
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            Feature::Block { id, .. }
+            | Feature::Cylinder { id, .. }
+            | Feature::Hole { id, .. }
+            | Feature::Pocket { id, .. }
+            | Feature::Boss { id, .. }
+            | Feature::Fillet { id, .. }
+            | Feature::Chamfer { id, .. }
+            | Feature::Pattern { id, .. }
+            | Feature::BaseFlange { id, .. }
+            | Feature::Flange { id, .. }
+            | Feature::Cutout { id, .. }
+            | Feature::Relief { id, .. } => id.as_deref(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HoleKind {
     Simple,

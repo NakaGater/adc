@@ -8,6 +8,4 @@ description = "ADC 正典IR (design.ron) の型定義・パース・シリアラ
 serde = { workspace = true }
 ron = { workspace = true }
 thiserror = { workspace = true }
-
-[dev-dependencies]
-serde_json = "1"
+serde_json = { workspace = true }

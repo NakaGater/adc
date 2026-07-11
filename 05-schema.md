@@ -46,6 +46,14 @@ enum ParamValue {
 
 数値を書ける全ての場所は `Expr` を受け付ける: リテラル / `param(id)` / 四則演算。`Determined` も式を許す(導出パラメータ)。param間の循環参照は静的検証でエラー(E-SCHEMA-CYCLE)。`Open` の range / nominal は探索境界であり式を許さない(リテラル固定)。
 
+### 2.1 評価とOpen伝播の意味論(2026-07-11決定、M0-3)
+
+- **EvalContext** = 基底Openパラメータ(`value: Open` で宣言されたparam)への数値割当。未割当の基底Openは公称値(nominal)で評価する。`evaluate(expr, ctx) -> f64`
+- 導出パラメータ(`Determined(Expr)`)は循環なし保証(E-SCHEMA-CYCLE)の下で**位相順に解決**する
+- ある値が**実効的にOpen** ⇔ その式が基底Openパラメータに**推移的に依存**する
+- ADR-004の3点評価の**標本軸は基底Openパラメータのみ**。導出値は軸にしない(組み合わせ爆発の防止。1変数ずつの絞り込み原則とも整合)
+- 評価時の失敗(ゼロ除算・非有限値)は E-SCHEMA-EVAL(§8)。チェッカー文脈ではInconclusive相当として扱う
+
 ## 3. Rationale
 
 ```rust
@@ -230,7 +238,7 @@ MVPでのGeomTolは(1)静的検証(データム参照の妥当性=DatumValidity)
 
 | コード | 意味 |
 |---|---|
-| E-SCHEMA-PARSE / -REF / -UNIT / -CYCLE / -RATIONALE / -DUP / -RANGE | 静的検証エラー(-DUP: 種別内重複ID、-RANGE: Open範囲の不整合) |
+| E-SCHEMA-PARSE / -REF / -UNIT / -CYCLE / -RATIONALE / -DUP / -RANGE / -EVAL | 静的検証・評価エラー(-DUP: 種別内重複ID、-RANGE: Open範囲の不整合、-EVAL: 式評価の失敗=ゼロ除算等) |
 | E-ANCHOR-BIND | アンカー再束縛失敗 {anchor_id, feature_id, cause} |
 | E-FEATURE-FAIL | OCCT操作失敗 {feature_id, occt_error, hint} |
 | E-MATE-UNSOLVED / -CYCLE | アセンブリ解決失敗(-CYCLEは静的検証でも検出) |

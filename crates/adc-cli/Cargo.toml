@@ -1,0 +1,13 @@
+[package]
+name = "adc-cli"
+version.workspace = true
+edition.workspace = true
+description = "ADC CLI — adc バイナリ (07-cli.md)"
+
+[[bin]]
+name = "adc"
+path = "src/main.rs"
+
+[dependencies]
+adc-schema = { path = "../adc-schema" }
+serde_json = { workspace = true }
