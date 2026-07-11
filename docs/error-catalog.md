@@ -34,7 +34,7 @@
 | コード | 意味 | ユニット |
 |---|---|---|
 | E-SCHEMA-UNIT | 単位不整合(単位検証の導入時) | M2以降 |
-| E-ANCHOR-BIND | アンカー再束縛失敗 {anchor_id, feature_id, cause} | M1-5 |
+| E-ANCHOR-BIND | アンカー再束縛失敗 {anchor_id, feature_id(原因フィーチャー), cause, hint}。**causeは Deleted / Untracked / Ambiguous の3値で型固定**(2026-07-12決定、adc-schema::AnchorBindError実装済み)。Ambiguousは修復ヒント(より特定的な面への貼り直し)を必ず含む。判定規則は docs/provides-predicates.md | 型=済 / 束縛=M1-5 |
 | E-FEATURE-FAIL | OCCT操作失敗 {feature_id, occt_error, hint} | M1-7 |
 | E-MATE-UNSOLVED | アセンブリ解決失敗(実行時) | M3-2 |
 | E-MATE-CYCLE | mateグラフの循環・自己参照(**静的検証はM0-2で実装済み**。a=基準側→b=被拘束側の有向グラフ) | 済 / M3 |
