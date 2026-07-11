@@ -69,6 +69,31 @@ pub fn make_cylinder_dir(base: [f64; 3], dir: [f64; 3], r: f64, h: f64) -> Solid
     }
 }
 
+/// 円錐(台): 底面中心 base、軸方向 dir(単位ベクトル)、
+/// 底面半径 r_base(base側)、上面半径 r_far(base+dir*h側)、高さ h
+pub fn make_cone_dir(base: [f64; 3], dir: [f64; 3], r_base: f64, r_far: f64, h: f64) -> Solid {
+    // +Z軸の円錐を生成し、dirへ回転してから移動する
+    let cone = Shape::cone()
+        .bottom_radius(r_base)
+        .top_radius(r_far)
+        .height(h)
+        .build();
+    let d = v(dir).normalize();
+    let z = DVec3::Z;
+    let dot = z.dot(d).clamp(-1.0, 1.0);
+    let rotated = if dot > 1.0 - 1e-12 {
+        cone
+    } else if dot < -1.0 + 1e-12 {
+        cone.rotated(DVec3::X, std::f64::consts::PI)
+    } else {
+        let axis = z.cross(d).normalize();
+        cone.rotated(axis, dot.acos())
+    };
+    Solid {
+        inner: rotated.translated(v(base)),
+    }
+}
+
 /// 平面閉多角形(頂点列、同一平面上)を押し出したプリズム。
 /// corner_r > 0 なら断面の角を2Dフィレットしてから押し出す。
 /// extrude は方向×長さ(非正規化)。
@@ -118,6 +143,33 @@ impl Solid {
             .faces()
             .map(|f| FaceHandle { inner: f })
             .collect()
+    }
+
+    /// エッジ列にフィレットを適用。結果と履歴を返す。
+    /// 失敗(半径過大等)はOCCT例外を捕捉して構造化メッセージで返す(abortしない)。
+    pub fn fillet_edges_with_history(
+        &self,
+        edges: &[&EdgeHandle],
+        radius: f64,
+    ) -> Result<(Solid, History), String> {
+        let (shape, history) = self
+            .inner
+            .fillet_edges_with_history(radius, edges.iter().map(|e| &e.inner))
+            .map_err(|e| e.to_string())?;
+        Ok((Solid { inner: shape }, History { inner: history }))
+    }
+
+    /// エッジ列に面取りを適用。結果と履歴を返す。失敗はabortせず構造化メッセージ。
+    pub fn chamfer_edges_with_history(
+        &self,
+        edges: &[&EdgeHandle],
+        distance: f64,
+    ) -> Result<(Solid, History), String> {
+        let (shape, history) = self
+            .inner
+            .chamfer_edges_with_history(distance, edges.iter().map(|e| &e.inner))
+            .map_err(|e| e.to_string())?;
+        Ok((Solid { inner: shape }, History { inner: history }))
     }
 
     /// 軸平行バウンディングボックス (min, max)
@@ -177,6 +229,11 @@ impl EdgeHandle {
     pub fn end(&self) -> [f64; 3] {
         let p = self.inner.end_point();
         [p.x, p.y, p.z]
+    }
+
+    /// 同一の位相実体を指すか(向きの違いは無視)
+    pub fn is_same(&self, other: &EdgeHandle) -> bool {
+        self.inner.is_same(&other.inner)
     }
 
     /// 円(弧)エッジか

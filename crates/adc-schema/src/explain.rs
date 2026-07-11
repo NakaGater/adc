@@ -289,6 +289,36 @@ fn rationale_siblings(design: &Design, rid: &str, self_kind: &str, self_id: &str
     out
 }
 
+/// "bolts[1][0]" → ("bolts", [1, 0])
+fn parse_indexed(q: &str) -> Option<(&str, Vec<u32>)> {
+    let open = q.find('[')?;
+    let (base, rest) = q.split_at(open);
+    if base.is_empty() {
+        return None;
+    }
+    let mut idx = Vec::new();
+    let mut rest = rest;
+    while !rest.is_empty() {
+        let inner = rest.strip_prefix('[')?;
+        let close = inner.find(']')?;
+        idx.push(inner[..close].parse().ok()?);
+        rest = &inner[close + 1..];
+    }
+    (!idx.is_empty()).then_some((base, idx))
+}
+
+fn pattern_instance_in_bounds(f: &Feature, idx: &[u32]) -> bool {
+    let Feature::Pattern { kind, count, .. } = f else {
+        return false;
+    };
+    use crate::{Count, PatternKind};
+    match (kind, count, idx) {
+        (PatternKind::Linear | PatternKind::Circular, Count::One(n), [i]) => i < n,
+        (PatternKind::Linear2D, Count::Two(nx, ny), [i, j]) => i < nx && j < ny,
+        _ => false,
+    }
+}
+
 fn find_features(
     f: &Feature,
     query: &str,
@@ -306,6 +336,23 @@ fn find_features(
             referenced_by: refs_of(&Target::Feature(part.to_string(), query.to_string())),
             related: vec![],
         });
+    }
+    // Patternの添字インスタンス "p[i]" / "p[i][j]" (§4.1)
+    if let Some((base, idx)) = parse_indexed(query) {
+        if f.id() == Some(base) && pattern_instance_in_bounds(f, &idx) {
+            matches.push(Explanation {
+                kind: "feature".into(),
+                id: query.to_string(),
+                part: Some(part.to_string()),
+                definition: serde_json::json!({
+                    "pattern": to_value(f),
+                    "instance": idx,
+                }),
+                rationale_chain: vec![],
+                referenced_by: refs_of(&Target::Feature(part.to_string(), query.to_string())),
+                related: vec![],
+            });
+        }
     }
     if let Feature::Pattern { of, .. } = f {
         find_features(of, query, part, matches, refs_of);

@@ -124,8 +124,8 @@ struct Ctx<'a> {
     dims: HashSet<&'a str>,
     /// instance id → part id(partの存在は別途検証)
     instances: HashMap<&'a str, &'a str>,
-    /// part id → そのPartのフィーチャーID集合(Pattern.of内も含む)
-    part_features: HashMap<&'a str, HashSet<&'a str>>,
+    /// part id → そのPartの参照可能フィーチャーID集合(Pattern添字ID含む)
+    part_features: HashMap<&'a str, HashSet<String>>,
     /// part id → アンカーID → kind
     part_anchors: HashMap<&'a str, HashMap<&'a str, AnchorKind>>,
 }
@@ -444,12 +444,35 @@ fn feature_id(f: &Feature) -> Option<&str> {
     }
 }
 
-fn collect_feature_ids<'a>(f: &'a Feature, out: &mut Vec<&'a str>) {
+/// 参照可能なフィーチャーIDを収集する。
+/// Patternは添字付きインスタンスID(`p[i]` / `p[i][j]`、§4.1)を合成する。
+/// Pattern内側フィーチャーのidは参照可能名ではない(添字IDのみ — provides-predicates.md)。
+fn collect_feature_ids(f: &Feature, out: &mut Vec<String>) {
     if let Some(id) = feature_id(f) {
-        out.push(id);
+        out.push(id.to_string());
     }
-    if let Feature::Pattern { of, .. } = f {
-        collect_feature_ids(of, out);
+    if let Feature::Pattern {
+        id: Some(pid),
+        kind,
+        count,
+        ..
+    } = f
+    {
+        match (kind, count) {
+            (crate::PatternKind::Linear | crate::PatternKind::Circular, crate::Count::One(n)) => {
+                for i in 0..*n {
+                    out.push(format!("{pid}[{i}]"));
+                }
+            }
+            (crate::PatternKind::Linear2D, crate::Count::Two(nx, ny)) => {
+                for i in 0..*nx {
+                    for j in 0..*ny {
+                        out.push(format!("{pid}[{i}][{j}]"));
+                    }
+                }
+            }
+            _ => {} // kind/countの不整合はコンパイル時にE-FEATURE-FAIL
+        }
     }
 }
 
@@ -500,19 +523,31 @@ fn validate(design: &Design, src: &str) -> Vec<ValidationError> {
     collect_unique(&mut errs, &loc, "assertion", design.assertions.iter().map(|a| a.id.as_str()));
     let dims = collect_unique(&mut errs, &loc, "dim", design.dims.iter().map(|d| d.id.as_str()));
 
-    let mut part_features: HashMap<&str, HashSet<&str>> = HashMap::new();
+    let mut part_features: HashMap<&str, HashSet<String>> = HashMap::new();
     let mut part_anchors: HashMap<&str, HashMap<&str, AnchorKind>> = HashMap::new();
     for part in &design.parts {
-        let mut fids: Vec<&str> = Vec::new();
+        let mut fids: Vec<String> = Vec::new();
         for f in &part.features {
             collect_feature_ids(f, &mut fids);
         }
-        let fset = collect_unique(
-            &mut errs,
-            &loc,
-            &format!("part \"{}\" のフィーチャー", part.id),
-            fids.into_iter(),
-        );
+        let mut fset: HashSet<String> = HashSet::new();
+        let mut dup_n: HashMap<String, usize> = HashMap::new();
+        for id in fids {
+            if !fset.insert(id.clone()) {
+                let n = dup_n.entry(id.clone()).or_insert(0);
+                *n += 1;
+                let span = loc.definition(&id, *n);
+                errs.push(ValidationError {
+                    code: ErrorCode::SchemaDup,
+                    message: format!(
+                        "part \"{}\" のフィーチャー ID \"{id}\" が重複しています(種別内で一意であること: 05-schema.md §1.1)",
+                        part.id
+                    ),
+                    span,
+                    related: vec![id],
+                });
+            }
+        }
         part_features.insert(part.id.as_str(), fset);
 
         collect_unique(

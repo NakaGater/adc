@@ -171,6 +171,32 @@ impl AnchorBindError {
     }
 }
 
+/// E-FEATURE-FAIL: OCCT操作失敗 {feature_id, occt_error, hint} (05-schema.md §8)。
+/// プロセスをabortさせず、エージェント修復ループの入力として返す (US-08)。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FeatureFailError {
+    pub feature_id: String,
+    /// OCCT側のエラーメッセージ
+    pub occt_error: String,
+    /// 修復の示唆(半径過大の可能性等)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+impl fmt::Display for FeatureFailError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "E-FEATURE-FAIL: \"{}\": {}",
+            self.feature_id, self.occt_error
+        )?;
+        if let Some(h) = &self.hint {
+            write!(f, " — ヒント: {h}")?;
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Display for AnchorBindError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

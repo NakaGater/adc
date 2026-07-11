@@ -57,8 +57,11 @@
 | edge: rim | wall面の円エッジのうち、工具軸に沿って**配置面に最も近い側**のもの(開口円) |
 
 Through の工具は板厚を両側に貫通させる(結果に工具端面の像は残らない)。
-Counterbore の座ぐり部(cb_d/cb_depth)の面は現状providesに含めない(§4.1の表どおり。
-必要になれば cb_wall / cb_floor を本書とともに追加する)。
+Counterbore の座ぐり部(cb_d/cb_depth)、Countersink の皿もみ円錐面は現状providesに
+含めない(§4.1の表どおり。必要になれば cb_wall / cs_face 等を本書とともに追加する)。
+Counterbore/Countersink の小径工具は座ぐり底/皿もみ底から**0.5mmだけ上側工具に
+食い込ませて**構成する(全通しにすると工具フューズで小径側面が2分割され
+Ambiguousになるため)。Tapped はねじ山を形状モデル化せず Simple と同一幾何(MVP)。
 
 ### Pocket (profile, depth, corner_r, at)
 
@@ -83,13 +86,36 @@ Counterbore の座ぐり部(cb_d/cb_depth)の面は現状providesに含めない
 providesなし(§4.1)。ただし既存providesの前送りに BRepFilletAPI 系の
 Modified/Generated を用いる。述語の追加が必要になった場合は本書を更新する。
 
-### Pattern (M1-4)
+### Pattern (M1-4実装済み)
 
-各インスタンスのprovidesに `[i]`(Linear2Dは `[i][j]`)添字を付けて登録する。
-インスタンスの同定は展開順(i=0..count-1、ピッチ方向に昇順)で決定的に行う。
+各インスタンスのprovidesは**添字付きフィーチャーID** `<pattern_id>[i]`
+(Linear2Dは `<pattern_id>[i][j]`)で参照する:
+`feature("bolts[0][1]").face("wall")`。静的検証は添字の範囲をcountで検査する。
+
+- **展開規則**: グリッドは `at`(必須)のフレーム原点を中心に**センタリング**される。
+  オフセット = (i − (n−1)/2)·pitch。Linear/Linear2Dの添字はフレームx/y軸方向に昇順
+- **Circular**: `axis`(axis要素のprovides参照)まわりに基準配置から
+  **反時計回り(右手系)**に pitch度 × k 回転。添字は k=0..count−1
+- Pattern内側フィーチャーのid自体は参照可能名ではない(添字IDのみ)。
+  内側はHole/Pocket/Bossに対応
+- **未決**: §9サンプルのPatternは `at` を持たない。既定規則(ルート天面中心等)を
+  導入するかサンプルを修正するか、M1-6までに要決定
 
 ## E-ANCHOR-BIND との対応
 
 - 前送りで対応が消滅(IsRemoved) → cause: **Deleted**
 - Modified/Generatedとも空かつ結果に元形状が残存しない → cause: **Untracked**
 - 単一面providesが複数面に対応 → cause: **Ambiguous**(修復ヒント必須)
+
+## エッジ解決の方針(2026-07-12決定、M1-3)
+
+EdgeSelector(`edges_of` / `edges_between`)は**遅延解決**とする:
+Fillet / Chamfer / `from_edge` のコンパイル時点で、**前送り済みの束縛面の境界辺**
+から導出する。永続的なエッジ台帳は作らない(エッジのHistory追跡は面より弱いため、
+辺を長期参照で運ばない)。
+
+- `edges_of(<binding>)` = 束縛面(集合可)の境界辺全部。**外周と内周(穴のリム等)を
+  区別しない**ことに注意 — 内周を除きたい場合は `edges_between` でより特定的に選ぶ
+- `edges_between(<a>, <b>)` = 両面グループの共有辺(TopoDS IsSame、向きの違いは無視)。
+  集合provides(boss.side等)も面グループとして受け付ける
+- 例外: Holeの `rim` は§4.1のprovides要素なので台帳に載り、History前送りされる

@@ -52,6 +52,38 @@ pub(crate) fn world_frame() -> Frame {
     }
 }
 
+/// Rodriguesの回転公式: ベクトル v を単位軸 k まわりに theta 回転
+pub(crate) fn rotate_vec(v: [f64; 3], k: [f64; 3], theta: f64) -> [f64; 3] {
+    let (s, c) = theta.sin_cos();
+    let kxv = cross(k, v);
+    let kdv = dot(k, v);
+    add(
+        add(scale(v, c), scale(kxv, s)),
+        scale(k, kdv * (1.0 - c)),
+    )
+}
+
+/// 点 p を軸(axis_origin, 単位方向 axis_dir)まわりに theta 回転
+pub(crate) fn rotate_point_about_line(
+    p: [f64; 3],
+    axis_origin: [f64; 3],
+    axis_dir: [f64; 3],
+    theta: f64,
+) -> [f64; 3] {
+    add(axis_origin, rotate_vec(sub(p, axis_origin), axis_dir, theta))
+}
+
+/// フレーム全体を軸まわりに回転(Circularパターン用)
+pub(crate) fn rotate_frame(f: &Frame, axis_origin: [f64; 3], axis_dir: [f64; 3], theta: f64) -> Frame {
+    let k = normalize(axis_dir);
+    Frame {
+        origin: rotate_point_about_line(f.origin, axis_origin, k, theta),
+        x: rotate_vec(f.x, k, theta),
+        y: rotate_vec(f.y, k, theta),
+        z: rotate_vec(f.z, k, theta),
+    }
+}
+
 /// 面の生成時点の幾何(重心・外向き法線)からのフレーム導出
 /// (docs/placement-frames.md):
 /// origin=重心、z=外向き法線、x=基準軸(+X、ただしzと平行なら+Y)の面内射影、y=z×x
