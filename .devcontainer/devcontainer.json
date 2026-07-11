@@ -1,0 +1,12 @@
+{
+  "name": "adc",
+  "build": { "dockerfile": "Dockerfile" },
+  "containerEnv": {
+    "CARGO_TARGET_DIR": "/opt/cargo-target"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["rust-lang.rust-analyzer"]
+    }
+  }
+}

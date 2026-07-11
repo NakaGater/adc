@@ -77,7 +77,7 @@
 2. イテレーション高速化が欲しい開発ループでは `apt install libocct-*-dev`(7.8.1)+ `--no-default-features` の動的リンクを許可。**同じ7.8.1なので形状演算結果の乖離リスクが最小**。
 3. macOSローカルはHomebrew 7.9.3+動的リンクを「便宜的に可」とするが、**ゴールデンテストの基準値は必ずコンテナ(7.8.1)内で生成・検証**する(7.8↔7.9のアルゴリズム差異による微小数値差の混入防止)。
 4. CIは同一devcontainerイメージ+`Swatinem/rust-cache`(上流CIと同方式)。
-5. ソースビルド所要時間は**未計測**。上流ワークスペースのコメントに「takes quite awhile to build」とあり、一般的なOCCTフルビルドの経験則では4〜8コアで概ね15〜40分程度と**推定**(M1-0の残タスクとしてdevcontainerイメージビルド時に実測し記録すること)。
+5. ソースビルド所要時間の**実測値(2026-07-11、Apple Silicon Mac上のDocker/arm64、Debian trixie-slimベース)**: warmupビルド(occt-sys v0.6.0のOCCT 7.8.1 cmakeビルド+opencascade cxxブリッジ、release)**5分57秒**、イメージビルド全体(apt+rustup込み)**6分42秒**。イメージサイズ3.44GB(うちcargo target 1.4GB)。事前推定の15〜40分より大幅に速い(ninja+高並列arm64ネイティブ、可視化系モジュール非対象のため)。x86_64ホストやCIランナーでは要再計測。なお依存解決の実体は git の opencascade-sys → **crates.io の occt-sys v0.6.0(OCCT 7.8.1をvendor)** であり、サブモジュール直参照ではない。
 
 ## 5. リスクと未確認事項
 
@@ -89,7 +89,7 @@
 5. STEP出力は現状スキーマ指定不可(AsIs転送+デフォルトスキーマ)。AP242要件はInterface_Static露出(S)まで未達成。
 
 **未確認事項(推測と区別して明記)**:
-- occt-sys(builtin)の**実ビルド時間は未計測**(上記15〜40分は推定)。
+- ~~occt-sys(builtin)の実ビルド時間は未計測~~ → **実測済み**(§4参照: warmup 5分57秒 / イメージ全体6分42秒、Apple Silicon)。x86_64/CIでは未計測。
 - OCCT 7.8.1における `write.step.schema` の**AP242指定値の正確な文字列("AP242DIS"等)と、AP242 ISへの対応範囲は未確認**(実装時にOCCT 7.8ドキュメントで確認)。
 - **PMI(GD&T)のセマンティック出力がOCCT 7.8.1のXDEでどこまで書き出せるか**(グラフィカルPMI/セマンティックPMIの範囲)は本調査では未確認。
 - Ubuntu 25.04/25.10 のocctパッケージ版は未確認(Debian trixie 7.8.1で代替確認済みのため影響小)。
