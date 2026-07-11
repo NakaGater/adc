@@ -1,0 +1,10 @@
+[package]
+name = "adc-schema"
+version.workspace = true
+edition.workspace = true
+description = "ADC 正典IR (design.ron) の型定義・パース・シリアライズ (OCCT非依存)"
+
+[dependencies]
+serde = { workspace = true }
+ron = { workspace = true }
+thiserror = { workspace = true }

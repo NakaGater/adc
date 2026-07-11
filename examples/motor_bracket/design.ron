@@ -1,0 +1,37 @@
+Design(
+  schema_version: "0.1",
+  intent: "モーターマウントブラケット: M6x4でフレームに締結、6006ベアリング(外径φ55)の座面を保持",
+  params: [
+    Param(id: "wall_t", value: Open(range: (3.0, 6.0), nominal: 4.0), unit: Mm, rationale: "r_wall"),
+    Param(id: "bore_d", value: Determined(55.0), unit: Mm, rationale: "r_bore"),
+  ],
+  materials: [Material(id: "a5052", density_g_cm3: 2.68, name: "A5052")],
+  parts: [
+    Part(
+      id: "bracket", material: "a5052", process: Machining,
+      features: [
+        Block(id: "base", x: 80.0, y: 60.0, z: param("wall_t")),
+        Hole(id: "bore", kind: Simple, d: param("bore_d"), depth: Through,
+             at: on(feature("base").face("top"), center())),
+        Pattern(id: "bolts", of: Hole(kind: Counterbore, d: 6.6, cb_d: 11.0, cb_depth: 6.5, depth: Through),
+                kind: Linear2D, count: (2,2), pitch: (64.0, 44.0)),
+        Fillet(id: "f1", edges: edges_of(feature("base").face("top")), r: 2.0),
+      ],
+      anchors: [
+        Anchor(id: "bearing_bore", kind: Face, binding: feature("bore").face("wall")),
+        Anchor(id: "mount_face",  kind: Face, binding: feature("base").face("bottom")),
+        Anchor(id: "datum_a",     kind: Datum('A'), binding: feature("base").face("bottom")),
+      ],
+    ),
+  ],
+  assertions: [
+    Assertion(id: "a_mass", check: Mass(part: "bracket", max: 250.0), rationale: "r_mass"),
+    Assertion(id: "a_wall", check: WallThickness(part: "bracket", min: 2.5, sample_density: 1.0), rationale: "r_wall"),
+  ],
+  rationales: [
+    Rationale(id: "r_wall", author: Human("nakag"), basis: Assumption,
+              note: "剛性未評価のため仮置き。DFM検証後に確定", timestamp: "2026-07-11T00:00:00Z"),
+    Rationale(id: "r_bore", author: Human("nakag"), basis: Standard("JIS B 1521 深溝玉軸受 6006 外径φ55"), note: "座面はめあいH7を想定", timestamp: "2026-07-11T00:00:00Z"),
+    Rationale(id: "r_mass", author: Human("nakag"), basis: Requirement("REQ-012 質量目標"), note: "", timestamp: "2026-07-11T00:00:00Z"),
+  ],
+)
