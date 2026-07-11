@@ -39,7 +39,7 @@ fn run(args: &[&str]) -> (i32, String, String) {
 
 const PASS_A: &str = r#"Assertion(id: "a_ok", check: BoundingBox(part: "p1", max: (40.0, 70.0, 5.0)), rationale: "r0")"#;
 const FAIL_A: &str = r#"Assertion(id: "b_ng", check: BoundingBox(part: "p1", max: (20.0, 70.0, 5.0)), rationale: "r0")"#;
-const INC_A: &str = r#"Assertion(id: "c_inc", check: Mass(part: "p1", max: 100.0), rationale: "r0")"#;
+const INC_A: &str = r#"Assertion(id: "c_inc", check: SheetMetalRules(part: "p1"), rationale: "r0")"#;
 
 #[test]
 fn exit_codes_0_1_2() {

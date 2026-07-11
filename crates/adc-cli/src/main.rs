@@ -6,7 +6,7 @@
 //! - `adc export --step [--design <path>] [--out <dir>]`(M1-6)
 //!   部品ごとに <out>/<part_id>.step を出力(既定スキーマAP214 — M1-6緩和)。
 //!   exit: 0=成功 / 2=E-*エラー
-//! - `adc check [--design <path>] [--format=jsonl|text] [--filter <id,..>] [--timings]`(M2-1)
+//! - `adc check [--design <path>] [--format=jsonl|text] [--filter <id,..>] [--timings] [--no-cache]`(M2-1/M2-6)
 //!   stdout=results.jsonl(正準・決定的)またはtext。timingsはstderrのみ。
 //!   exit: 0=全Pass / 1=Fail≥1 / 2=Inconclusive≥1またはE-*
 
@@ -153,6 +153,7 @@ fn check_cmd(args: &[String]) -> Result<ExitCode, String> {
     let mut format = "text".to_string();
     let mut filter: Option<Vec<String>> = None;
     let mut timings = false;
+    let mut no_cache = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -170,6 +171,10 @@ fn check_cmd(args: &[String]) -> Result<ExitCode, String> {
             }
             "--timings" => {
                 timings = true;
+                i += 1;
+            }
+            "--no-cache" => {
+                no_cache = true;
                 i += 1;
             }
             f if f.starts_with("--format") => {
@@ -205,8 +210,27 @@ fn check_cmd(args: &[String]) -> Result<ExitCode, String> {
         }
     };
 
-    let (mut results, times) =
-        adc_check::run_checks_with_timings(&design, &adc_schema::EvalContext::nominal());
+    // キャッシュ (M2-6): 既定は design と同じ場所の .adc/cache
+    let cache_dir = if no_cache {
+        None
+    } else {
+        std::path::Path::new(&design_path)
+            .parent()
+            .map(|d| d.join(".adc").join("cache"))
+    };
+    let opts = adc_check::CheckOptions { cache_dir };
+    let (mut results, times, events) =
+        adc_check::run_checks_full(&design, &adc_schema::EvalContext::nominal(), &opts);
+    for ev in &events {
+        match ev {
+            adc_check::CacheEvent::PartHit(id) => eprintln!("cache	part:{id}	hit"),
+            adc_check::CacheEvent::PartCompiled(id) => eprintln!("cache	part:{id}	compiled"),
+            adc_check::CacheEvent::ResultHit(id) => eprintln!("cache	result:{id}	hit"),
+            adc_check::CacheEvent::ResultComputed(id) => {
+                eprintln!("cache	result:{id}	computed")
+            }
+        }
+    }
     if let Some(f) = &filter {
         results.retain(|r| f.contains(&r.assert_id));
     }

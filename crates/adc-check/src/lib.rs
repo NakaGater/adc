@@ -13,9 +13,12 @@ pub mod checkers;
 
 use std::collections::BTreeMap;
 
-use adc_compile::{compile_part, CompiledPart};
-use adc_schema::{Assertion, Check, Design, EvalContext, Evaluator};
+use std::path::PathBuf;
+
+use adc_compile::{compile_part, compile_part_cached, part_cache_key, CacheOutcome, CompiledPart};
+use adc_schema::{Assertion, Check, Design, EvalContext, Evaluator, GeomRef, Scope};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// 正準出力の浮動小数量子化(1e-9 — 05-schema.md §6)
 pub fn q(v: f64) -> f64 {
@@ -90,14 +93,52 @@ pub struct CompiledModel {
     pub part_errors: BTreeMap<String, String>,
     /// (instance_id, part_id)
     pub instances: Vec<(String, String)>,
+    /// part id → 材料密度 g/cm³(材料未定義はNone → Inconclusive)
+    pub part_density: BTreeMap<String, Option<f64>>,
+    /// part id → Datumアンカーidの列(宣言順)
+    pub part_datums: BTreeMap<String, Vec<String>>,
+}
+
+/// キャッシュ設定 (M2-6)。cache_dir=Noneでキャッシュ無効(--no-cache)。
+#[derive(Debug, Clone, Default)]
+pub struct CheckOptions {
+    pub cache_dir: Option<PathBuf>,
+}
+
+/// キャッシュイベント(ログ・テスト検証用。正準出力ではない)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CacheEvent {
+    PartHit(String),
+    PartCompiled(String),
+    ResultHit(String),
+    ResultComputed(String),
 }
 
 pub fn compile_model(design: &Design, ctx: &EvalContext) -> CompiledModel {
+    compile_model_with(design, ctx, &CheckOptions::default()).0
+}
+
+pub fn compile_model_with(
+    design: &Design,
+    ctx: &EvalContext,
+    opts: &CheckOptions,
+) -> (CompiledModel, Vec<CacheEvent>) {
+    let mut events = Vec::new();
     let mut parts = BTreeMap::new();
     let mut part_errors = BTreeMap::new();
     for p in &design.parts {
-        match compile_part(design, &p.id, ctx) {
-            Ok(cp) => {
+        let outcome = match &opts.cache_dir {
+            Some(dir) => compile_part_cached(design, &p.id, ctx, dir)
+                .map(|(cp, o)| (cp, o == CacheOutcome::Hit)),
+            None => compile_part(design, &p.id, ctx).map(|cp| (cp, false)),
+        };
+        match outcome {
+            Ok((cp, hit)) => {
+                events.push(if hit {
+                    CacheEvent::PartHit(p.id.clone())
+                } else {
+                    CacheEvent::PartCompiled(p.id.clone())
+                });
                 parts.insert(p.id.clone(), cp);
             }
             Err(e) => {
@@ -111,11 +152,94 @@ pub fn compile_model(design: &Design, ctx: &EvalContext) -> CompiledModel {
         .flat_map(|a| a.instances.iter())
         .map(|i| (i.id.clone(), i.part.clone()))
         .collect();
-    CompiledModel {
-        parts,
-        part_errors,
-        instances,
+    let materials: BTreeMap<&str, f64> = design
+        .materials
+        .iter()
+        .map(|m| (m.id.as_str(), m.density_g_cm3))
+        .collect();
+    let mut part_density = BTreeMap::new();
+    let mut part_datums = BTreeMap::new();
+    for p in &design.parts {
+        part_density.insert(p.id.clone(), materials.get(p.material.as_str()).copied());
+        part_datums.insert(
+            p.id.clone(),
+            p.anchors
+                .iter()
+                .filter(|an| matches!(an.kind, adc_schema::AnchorKind::Datum(_)))
+                .map(|an| an.id.clone())
+                .collect(),
+        );
     }
+    (
+        CompiledModel {
+            parts,
+            part_errors,
+            instances,
+            part_density,
+            part_datums,
+        },
+        events,
+    )
+}
+
+/// アサーションが依存する部品集合(結果キャッシュキー用)。
+/// 解決できない参照を含む場合はNone(=キャッシュしない)。
+fn involved_parts(check: &Check, model: &CompiledModel) -> Option<Vec<String>> {
+    let inst_part = |iid: &str| -> Option<String> {
+        model
+            .instances
+            .iter()
+            .find(|(i, _)| i == iid)
+            .map(|(_, p)| p.clone())
+    };
+    let geom_part = |g: &GeomRef| -> Option<String> {
+        match g {
+            GeomRef::Part(p) => Some(p.clone()),
+            GeomRef::Anchor(path) => inst_part(&path.instance),
+        }
+    };
+    let mut v: Vec<String> = match check {
+        Check::BoundingBox { part, .. }
+        | Check::Mass { part, .. }
+        | Check::WallThickness { part, .. }
+        | Check::DatumValidity { part }
+        | Check::SheetMetalRules { part } => vec![part.clone()],
+        Check::Clearance { a, b, .. } => vec![geom_part(a)?, geom_part(b)?],
+        Check::NoInterference { scope } => match scope {
+            Scope::All => model.instances.iter().map(|(_, p)| p.clone()).collect(),
+            Scope::Pairs(ps) => ps.iter().flat_map(|(a, b)| [a.clone(), b.clone()]).collect(),
+        },
+        Check::Cog { .. } => {
+            if model.instances.is_empty() {
+                model.parts.keys().cloned().collect()
+            } else {
+                model.instances.iter().map(|(_, p)| p.clone()).collect()
+            }
+        }
+        _ => return None,
+    };
+    v.sort();
+    v.dedup();
+    Some(v)
+}
+
+/// 結果キャッシュキー: hash(ADCバージョン + Assertion正準形 + 依存部品キー列)
+/// Checker設定(sample_density等)はAssertion正準形に含まれる (ADR-003)
+fn result_cache_key(
+    design: &Design,
+    a: &Assertion,
+    parts: &[String],
+    ev: &Evaluator,
+) -> Option<String> {
+    let a_ron = ron::ser::to_string(a).ok()?;
+    let mut src = format!("adcres:{}|{}", env!("CARGO_PKG_VERSION"), a_ron);
+    for p in parts {
+        let key = part_cache_key(design, p, ev).ok()?;
+        src.push_str(&format!("|part:{p}={key}"));
+    }
+    let mut h = Sha256::new();
+    h.update(src.as_bytes());
+    Some(format!("{:x}", h.finalize()))
 }
 
 /// チェッカー契約 (05-schema.md §6): 純関数。並列実行可能。
@@ -129,6 +253,10 @@ fn checker_for(check: &Check) -> Option<&'static dyn Checker> {
         Check::BoundingBox { .. } => Some(&checkers::BoundingBoxChecker),
         Check::Clearance { .. } => Some(&checkers::ClearanceChecker),
         Check::NoInterference { .. } => Some(&checkers::NoInterferenceChecker),
+        Check::Mass { .. } => Some(&checkers::MassChecker),
+        Check::Cog { .. } => Some(&checkers::CogChecker),
+        Check::WallThickness { .. } => Some(&checkers::WallThicknessChecker),
+        Check::DatumValidity { .. } => Some(&checkers::DatumValidityChecker),
         _ => None,
     }
 }
@@ -139,12 +267,22 @@ pub fn run_checks(design: &Design, ctx: &EvalContext) -> Vec<CheckResult> {
 }
 
 /// タイミング付き実行。タイミングは正準出力ではない(--timings用、ミリ秒)。
-/// 計測はチェッカーの外側で行う(チェッカー自体は時刻に依存しない — ADR-003)。
 pub fn run_checks_with_timings(
     design: &Design,
     ctx: &EvalContext,
 ) -> (Vec<CheckResult>, Vec<(String, f64)>) {
-    let model = compile_model(design, ctx);
+    let (r, t, _) = run_checks_full(design, ctx, &CheckOptions::default());
+    (r, t)
+}
+
+/// キャッシュ・タイミング・イベント付きのフル実行 (M2-6)。
+/// 計測はチェッカーの外側で行う(チェッカー自体は時刻に依存しない — ADR-003)。
+pub fn run_checks_full(
+    design: &Design,
+    ctx: &EvalContext,
+    opts: &CheckOptions,
+) -> (Vec<CheckResult>, Vec<(String, f64)>, Vec<CacheEvent>) {
+    let (model, mut events) = compile_model_with(design, ctx, opts);
     let ev = match Evaluator::new(design, ctx) {
         Ok(ev) => ev,
         Err(e) => {
@@ -156,27 +294,61 @@ pub fn run_checks_with_timings(
                 })
                 .collect();
             rs.sort_by(|x, y| x.assert_id.cmp(&y.assert_id));
-            return (rs, vec![]);
+            return (rs, vec![], events);
         }
     };
     let mut results = Vec::new();
     let mut timings = Vec::new();
     for a in &design.assertions {
         let t0 = std::time::Instant::now();
-        let r = match checker_for(&a.check) {
-            Some(c) => c.check(&model, &ev, a),
-            None => CheckResult::inconclusive(
-                &a.id,
-                "unimplemented",
-                "チェッカー未実装(M2後続ユニット/T2以降)",
-            ),
+
+        // 結果キャッシュ (M2-6): 依存部品が全てコンパイル済みのときのみ
+        let rkey = opts.cache_dir.as_ref().and_then(|_| {
+            let parts = involved_parts(&a.check, &model)?;
+            if parts.iter().any(|p| !model.parts.contains_key(p)) {
+                return None;
+            }
+            result_cache_key(design, a, &parts, &ev)
+        });
+        let rpath = match (&opts.cache_dir, &rkey) {
+            (Some(dir), Some(k)) => Some(dir.join(format!("{k}.result.json"))),
+            _ => None,
+        };
+
+        let cached: Option<CheckResult> = rpath.as_ref().and_then(|p| {
+            let text = std::fs::read_to_string(p).ok()?;
+            serde_json::from_str(&text).ok()
+        });
+        let r = match cached {
+            Some(r) => {
+                events.push(CacheEvent::ResultHit(a.id.clone()));
+                r
+            }
+            None => {
+                let r = match checker_for(&a.check) {
+                    Some(c) => c.check(&model, &ev, a),
+                    None => CheckResult::inconclusive(
+                        &a.id,
+                        "unimplemented",
+                        "チェッカー未実装(M2後続ユニット/T2以降)",
+                    ),
+                };
+                if let Some(p) = &rpath {
+                    if !matches!(r.status, CheckStatus::Inconclusive { .. }) {
+                        let _ = std::fs::create_dir_all(p.parent().unwrap());
+                        let _ = std::fs::write(p, serde_json::to_string(&r).unwrap());
+                    }
+                }
+                events.push(CacheEvent::ResultComputed(a.id.clone()));
+                r
+            }
         };
         timings.push((a.id.clone(), t0.elapsed().as_secs_f64() * 1000.0));
         results.push(r);
     }
     results.sort_by(|x, y| x.assert_id.cmp(&y.assert_id));
     timings.sort_by(|x, y| x.0.cmp(&y.0));
-    (results, timings)
+    (results, timings, events)
 }
 
 /// results.jsonl の正準テキスト(1行1結果、決定的)

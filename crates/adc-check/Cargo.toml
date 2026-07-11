@@ -10,3 +10,5 @@ adc-compile = { path = "../adc-compile" }
 adc-kernel = { path = "../adc-kernel" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+ron = { workspace = true }
+sha2 = { workspace = true }

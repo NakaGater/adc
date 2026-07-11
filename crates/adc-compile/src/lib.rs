@@ -20,7 +20,10 @@
 //! (エッジのHistory追跡は面より弱いため長期参照で運ばない — 2026-07-12決定)。
 //! 板金(M5)、非ルート配置のBlock(M1-3以降)は未対応。
 
+mod cache;
 mod frame;
+
+pub use cache::{compile_part_cached, part_cache_key, BindingTable, CacheOutcome};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -253,6 +256,87 @@ impl CompiledPart {
             }),
             _ => None,
         }
+    }
+
+    /// 束縛表(anchor → 結果B-rep内の部分形状インデックス)を作る (M2-6 —
+    /// docs/binding-cache.md。決定的な部分形状列挙順に対するローカル整数)
+    pub fn binding_table(&self) -> Result<cache::BindingTable, String> {
+        let faces = self.solid.faces();
+        let edges = self.solid.edges();
+        let mut anchors = std::collections::BTreeMap::new();
+        for (anchor_id, key) in &self.anchor_keys {
+            let entry = self.ledger.get(key).ok_or("台帳不整合")?;
+            let cached = match entry {
+                Provided::Face(f) => {
+                    let idx = faces
+                        .iter()
+                        .position(|x| x.is_same(f))
+                        .ok_or_else(|| format!("アンカー {anchor_id} の面が結果に見つかりません"))?;
+                    cache::CachedBinding::Face { index: idx }
+                }
+                Provided::Edge(e) => {
+                    let idx = edges
+                        .iter()
+                        .position(|x| x.is_same(e))
+                        .ok_or_else(|| format!("アンカー {anchor_id} のエッジが結果に見つかりません"))?;
+                    cache::CachedBinding::Edge { index: idx }
+                }
+                Provided::Axis { origin, dir } => cache::CachedBinding::Axis {
+                    origin: *origin,
+                    dir: *dir,
+                },
+                _ => return Err(format!("アンカー {anchor_id} がキャッシュ不能な状態です")),
+            };
+            anchors.insert(anchor_id.clone(), cached);
+        }
+        Ok(cache::BindingTable { anchors })
+    }
+
+    /// キャッシュ(.brep+束縛表)からの復元 (M2-6)
+    pub fn from_cache(
+        part_id: &str,
+        solid: Solid,
+        table: &cache::BindingTable,
+    ) -> Result<CompiledPart, String> {
+        let faces = solid.faces();
+        let edges = solid.edges();
+        let mut ledger = HashMap::new();
+        let mut anchor_keys = HashMap::new();
+        for (anchor_id, cb) in &table.anchors {
+            let key = ("__cache__".to_string(), anchor_id.clone());
+            let provided = match cb {
+                cache::CachedBinding::Face { index } => {
+                    // 復元は同一.brepの決定的列挙順に対してのみ有効
+                    let f = faces
+                        .get(*index)
+                        .ok_or_else(|| format!("束縛表の面インデックス{index}が範囲外"))?;
+                    // FaceHandleは所有型のためインデックスから再取得
+                    let all = solid.faces();
+                    let f2 = all.into_iter().nth(*index).unwrap();
+                    let _ = f;
+                    Provided::Face(f2)
+                }
+                cache::CachedBinding::Edge { index } => {
+                    let _ = edges
+                        .get(*index)
+                        .ok_or_else(|| format!("束縛表のエッジインデックス{index}が範囲外"))?;
+                    let e2 = solid.edges().into_iter().nth(*index).unwrap();
+                    Provided::Edge(e2)
+                }
+                cache::CachedBinding::Axis { origin, dir } => Provided::Axis {
+                    origin: *origin,
+                    dir: *dir,
+                },
+            };
+            ledger.insert(key.clone(), provided);
+            anchor_keys.insert(anchor_id.clone(), key);
+        }
+        Ok(CompiledPart {
+            part_id: part_id.to_string(),
+            solid,
+            ledger,
+            anchor_keys,
+        })
     }
 
     /// providesの単一面を引く(テスト・上位層照会用)

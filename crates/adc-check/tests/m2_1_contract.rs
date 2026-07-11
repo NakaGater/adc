@@ -32,7 +32,7 @@ const PASS_A: &str =
 const FAIL_A: &str =
     r#"Assertion(id: "b_bbox", check: BoundingBox(part: "p1", max: (1.0, 50.0, 5.0)), rationale: "r0")"#;
 const INC_A: &str =
-    r#"Assertion(id: "c_mass", check: Mass(part: "p1", max: 100.0), rationale: "r0")"#;
+    r#"Assertion(id: "c_smr", check: SheetMetalRules(part: "p1"), rationale: "r0")"#;
 
 #[test]
 fn results_jsonl_is_byte_identical_across_runs() {
@@ -60,7 +60,7 @@ fn three_valued_status_and_exit_codes() {
     let d = design(&format!("{PASS_A}, {INC_A}"));
     let rs = run_checks(&d, &EvalContext::nominal());
     assert_eq!(exit_code(&rs), 2);
-    let inc = rs.iter().find(|r| r.assert_id == "c_mass").unwrap();
+    let inc = rs.iter().find(|r| r.assert_id == "c_smr").unwrap();
     match &inc.status {
         CheckStatus::Inconclusive { reason } => {
             assert!(reason.contains("未実装"), "{reason}")

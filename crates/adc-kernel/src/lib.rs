@@ -201,6 +201,30 @@ impl Solid {
         }
     }
 
+    /// 原点origin・方向dirの直線と全フェイスの交点を、直線パラメータt昇順で返す
+    pub fn ray_hits(&self, origin: [f64; 3], dir: [f64; 3]) -> Vec<(f64, [f64; 3])> {
+        let mut hits: Vec<(f64, [f64; 3])> = self
+            .inner
+            .faces_along_line(v(origin), v(dir))
+            .into_iter()
+            .map(|h| (h.t, [h.point.x, h.point.y, h.point.z]))
+            .collect();
+        hits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        hits
+    }
+
+    /// BRepバイナリ書き出し(.brepキャッシュ用)
+    pub fn write_brep(&self, path: &str) -> Result<(), String> {
+        self.inner.write_brep_bin(path).map_err(|e| e.to_string())
+    }
+
+    /// BRepバイナリ読み込み
+    pub fn read_brep(path: &str) -> Result<Solid, String> {
+        opencascade::primitives::Shape::read_brep_bin(path)
+            .map(|inner| Solid { inner })
+            .map_err(|e| e.to_string())
+    }
+
     /// 体積 (mm^3)
     pub fn volume(&self) -> f64 {
         self.inner.volume()
@@ -309,6 +333,23 @@ impl FaceHandle {
     pub fn normal(&self) -> [f64; 3] {
         let n = self.inner.normal_at_center();
         [n.x, n.y, n.z]
+    }
+
+    /// 同一の位相実体を指すか(向きの違いは無視)
+    pub fn is_same(&self, other: &FaceHandle) -> bool {
+        self.inner.is_same(&other.inner)
+    }
+
+    /// この面の軸平行バウンディングボックス(gap除去済み)
+    pub fn bounding_box(&self) -> ([f64; 3], [f64; 3]) {
+        let shape = self.inner.to_shape();
+        let aabb = opencascade::bounding_box::aabb(&shape);
+        let g = aabb.get_gap();
+        let (min, max) = (aabb.min(), aabb.max());
+        (
+            [min.x + g, min.y + g, min.z + g],
+            [max.x - g, max.y - g, max.z - g],
+        )
     }
 
     /// 面の境界エッジ(外周+内周ループの全部)

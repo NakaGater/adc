@@ -39,8 +39,63 @@
 - **Evidence(Failのペアごと)**: anchors=[part_a, part_b]、points=[交差部の体積重心]、
   note=交差体積
 
-## 未実装(M2後続)
+## mass (M2-3)
 
-Mass/Cog(M2-3)、WallThickness(M2-4)、DatumValidity(M2-5)、
+- **判定**: 質量 [g] = 体積 [mm³] × 密度 [g/cm³] ÷ 1000 が min ≤ m ≤ max
+- **measured / threshold**: 質量 / max
+- **margin** = min( (max−m)/|max|, (m−min)/|min| )(minがなければ前者のみ)
+- **Inconclusive**: 材料(密度)未定義
+- **Evidence(Fail)**: 違反した境界(上限/下限)と実測質量・密度
+
+## cog (M2-3)
+
+- **対象**: Assyがあれば全インスタンス、なければ全部品の質量加重合成重心(恒等配置)
+- **判定**: 重心 ∈ BoxSpec(各軸 min ≤ c ≤ max)
+- **measured**: 重心 [x,y,z] / **threshold**: boxのmax角(min角はEvidence noteに)
+- **margin** = min軸 (半幅 − |c − box中心|)/半幅(中心ど真ん中=1、境界=0、外=負)
+- **Evidence**: 実測重心座標+逸脱軸の列挙
+
+## wall_thickness (M2-4)
+
+- **sample_density の意味論**: **面上の格子密度 [点/mm²]**。格子間隔 = 1/√density。
+  sample_densityは結果キャッシュキーに含まれる(ADR-003)
+- **手法**: 各**平面フェイス**上に決定的格子を張り、面法線の逆向きにレイキャスト
+  (面の0.1mm外側から照射、最初のヒットが当該サンプル点であるレイのみ採用)。
+  最初の材料通過長 = その点の肉厚
+- **一方向保証(近似手法の保証範囲)**: **検出した違反は真。未検出は薄肉なしを
+  保証しない**(格子間隔より小さい薄肉形状・平面以外のフェイス(円筒壁の径方向等)は
+  見逃しうる = false negativeあり)。この注記を出力(Evidence note)にも常に含める
+- **M2-4時点の制約**: サンプリング対象は平面フェイスのみ。曲面フェイスの
+  サンプリングは将来拡張(本書を更新してから実装)
+- **measured / threshold**: 実測最小厚 / min
+- **margin** = (実測最小厚 − min)/|min|
+- **Evidence**: 最悪違反点の座標+実測厚+面法線、違反サンプル数/全サンプル数
+
+## datum_validity (M2-5)
+
+- **判定**: 部品のDatumアンカーが (1)存在しFaceに束縛 (2)平面 (3)相互に直交
+  (|cos| < 1e-6)。幾何公差の実測検証はスコープ外(§7の線を維持)
+- **measured / threshold**: max|cos(法線間)| / 0
+- **margin** = 1 − max|cos|(データム1個なら1.0)
+- **Inconclusive**: Datumアンカーなし
+- **Evidence(Fail)**: 違反データムの組と理由(非平面/非直交)
+
+## bounding_box 補足 (M2-5正式化)
+
+OCCTのBnd_Boxは既定でgap(1e-7)を含む — kernelで除去済みのため、
+量子化(1e-9)後の実測寸法は正確な設計寸法に一致する(occt-gotchas.md)。
+
+## キャッシュとの関係 (M2-6)
+
+- 部品キャッシュ: hash(ADCバージョン+Part正準形+参照param解決値) →
+  .brep+束縛表を併存保存(docs/binding-cache.md)。ヒット時も束縛表経由で
+  アンカー参照チェッカーが動作する
+- 結果キャッシュ: hash(ADCバージョン+Assertion正準形+依存部品キー列)。
+  **Checker設定(sample_density等)はAssertion正準形に含まれる**ため
+  設定変更は自動的にミスになる。Inconclusiveはキャッシュしない
+- `--no-cache` とキャッシュヒットの結果はバイト同一(受入テストで固定)
+
+## 未実装(M5以降)
+
 SheetMetalRules/ToleranceStack1D(M5)、ToolAccess/MinCornerRadius(M6)
 — 現状は Inconclusive{"チェッカー未実装"} を返す。
