@@ -1,0 +1,12 @@
+[package]
+name = "adc-kernel"
+version.workspace = true
+edition.workspace = true
+description = "OCCT FFI境界 — 唯一OCCTに触れる層 (ADR-002)"
+
+[dependencies]
+# TEMP: fork (NakaGater/opencascade-rs, branch adc) のGitHub作成後に
+#   opencascade = { git = "https://github.com/NakaGater/opencascade-rs.git", branch = "adc" }
+# へ差し替える(M1-1)。現在はローカルclone(同階層)へのpath依存。
+opencascade = { path = "../../../opencascade-rs/crates/opencascade" }
+glam = "0.24"

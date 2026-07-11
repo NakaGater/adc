@@ -80,6 +80,7 @@
 3. macOSローカルはHomebrew 7.9.3+動的リンクを「便宜的に可」とするが、**ゴールデンテストの基準値は必ずコンテナ(7.8.1)内で生成・検証**する(7.8↔7.9のアルゴリズム差異による微小数値差の混入防止)。
 4. CIは同一devcontainerイメージ+`Swatinem/rust-cache`(上流CIと同方式)。
 5. ソースビルド所要時間の**実測値(2026-07-11、Apple Silicon Mac上のDocker/arm64、Debian trixie-slimベース)**: warmupビルド(occt-sys v0.6.0のOCCT 7.8.1 cmakeビルド+opencascade cxxブリッジ、release)**5分57秒**、イメージビルド全体(apt+rustup込み)**6分42秒**。イメージサイズ3.44GB(うちcargo target 1.4GB)。事前推定の15〜40分より大幅に速い(ninja+高並列arm64ネイティブ、可視化系モジュール非対象のため)。x86_64ホストやCIランナーでは要再計測。なお依存解決の実体は git の opencascade-sys → **crates.io の occt-sys v0.6.0(OCCT 7.8.1をvendor)** であり、サブモジュール直参照ではない。
+   - **macOSネイティブビルドの注意(2026-07-12実測)**: Homebrewのcmake 4.xはOCCT 7.8.1の古い`cmake_minimum_required`を拒否する。`CMAKE_POLICY_VERSION_MINIMUM=3.5` を環境変数に設定すること(設定後のフルビルド+テストは5分20秒)。Debian trixieのcmakeは3.x系のためdevcontainerでは非該当。
 
 ## 5. リスクと未確認事項
 
