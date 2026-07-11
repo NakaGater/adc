@@ -28,7 +28,7 @@ fn spec_sample_parses() {
     assert!(d.intent.contains("モーターマウントブラケット"));
 
     // params
-    assert_eq!(d.params.len(), 2);
+    assert_eq!(d.params.len(), 3);
     assert_eq!(
         d.params[0].value,
         ParamValue::Open {
@@ -38,6 +38,8 @@ fn spec_sample_parses() {
     );
     assert_eq!(d.params[0].unit, Unit::Mm);
     assert_eq!(d.params[1].value, ParamValue::Determined(Expr::Lit(55.0)));
+    assert_eq!(d.params[2].id, "bolt_d");
+    assert_eq!(d.params[2].value, ParamValue::Determined(Expr::Lit(6.6)));
 
     // part / features
     assert_eq!(d.parts.len(), 1);
@@ -81,13 +83,10 @@ fn spec_sample_parses() {
             assert_eq!(count, &Count::Two(2, 2));
             assert_eq!(pitch, &Pitch::Two(Expr::Lit(64.0), Expr::Lit(44.0)));
             match of.as_ref() {
-                Feature::Hole {
-                    kind, d, cb_d, cb_depth, depth, ..
-                } => {
-                    assert_eq!(kind, &HoleKind::Counterbore);
-                    assert_eq!(d, &Expr::Lit(6.6));
-                    assert_eq!(cb_d, &Some(Expr::Lit(11.0)));
-                    assert_eq!(cb_depth, &Some(Expr::Lit(6.5)));
+                Feature::Hole { kind, d, depth, .. } => {
+                    // 2026-07-12修正: 六角ボルト+平ワッシャ想定のSimpleばか穴
+                    assert_eq!(kind, &HoleKind::Simple);
+                    assert_eq!(d, &Expr::Param("bolt_d".to_string()));
                     assert_eq!(depth, &HoleDepth::Through);
                 }
                 other => panic!("Pattern.of は Hole のはず: {other:?}"),
@@ -144,7 +143,7 @@ fn spec_sample_parses() {
     }
 
     // rationales
-    assert_eq!(d.rationales.len(), 3);
+    assert_eq!(d.rationales.len(), 4);
     assert_eq!(d.rationales[0].basis, Basis::Assumption);
     assert_eq!(d.rationales[0].author, Author::Human("nakag".to_string()));
     assert_eq!(
@@ -153,6 +152,11 @@ fn spec_sample_parses() {
     );
     assert_eq!(
         d.rationales[2].basis,
+        Basis::Standard("JIS B 1180 六角ボルト M6".to_string())
+    );
+    assert!(d.rationales[2].note.contains("ワッシャ"), "ボルト想定の明記");
+    assert_eq!(
+        d.rationales[3].basis,
         Basis::Requirement("REQ-012 質量目標".to_string())
     );
 }

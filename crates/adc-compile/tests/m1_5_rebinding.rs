@@ -4,8 +4,7 @@
 //! 定義変更→再buildのシナリオをテーブル駆動で固定する。
 //! M1 Exit条件「wall_t変更→再buildで全アンカーが再束縛される」の実体。
 //!
-//! 注: サンプルのcb_depth(6.5)は板厚(3〜6)より深いため、座ぐりは実質
-//! φ11貫通穴になる(幾何的に正当)。底面の穴はφ11×4+φ55。
+//! 底面の穴はφ6.6×4(Simpleばか穴 — 2026-07-12サンプル修正)+φ55。
 
 use adc_compile::{compile_part, BoundAnchorRef, CompileError, CompiledPart};
 use adc_schema::{validate_design, AnchorBindCause, ErrorCode, EvalContext};
@@ -13,7 +12,7 @@ use adc_schema::{validate_design, AnchorBindCause, ErrorCode, EvalContext};
 const EPS: f64 = 1e-6;
 const PI: f64 = std::f64::consts::PI;
 const R_BORE: f64 = 27.5;
-const R_CB: f64 = 5.5;
+const R_BOLT: f64 = 3.3;
 
 const BORE_LINES: &str = r#"        Hole(id: "bore", kind: Simple, d: param("bore_d"), depth: Through,
              at: on(feature("base").face("top"), center())),
@@ -48,9 +47,9 @@ fn anchor_area(cp: &CompiledPart, id: &str) -> f64 {
     }
 }
 
-/// 底面(mount_face/datum_a)の面積: 80x60 − φ55 − φ11×4
+/// 底面(mount_face/datum_a)の面積: 80x60 − φ55 − φ6.6×4
 fn mount_area() -> f64 {
-    80.0 * 60.0 - PI * R_BORE * R_BORE - 4.0 * PI * R_CB * R_CB
+    80.0 * 60.0 - PI * R_BORE * R_BORE - 4.0 * PI * R_BOLT * R_BOLT
 }
 
 // ================================================================ 1. パラメータ変更

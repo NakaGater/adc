@@ -128,7 +128,7 @@ enum Pos2 {
 | `Chamfer` | edges, size | — |
 | `Pattern` | of(FeatureRef), kind(Linear/Linear2D/Circular), count, pitch, **at(必須: グリッド中心)** | 各インスタンスのprovidesに `[i]` 添字(Linear2Dは `[i][j]`)。参照は `feature("bolts[0][1]")`。展開規則は docs/provides-predicates.md |
 
-`EdgeSelector` は意味選択のみ: `edges_of(anchor)` / `edges_between(anchor_a, anchor_b)`。幾何ID指定は存在しない。
+`EdgeSelector` は意味選択のみ: `edges_of(<face>)` = **束縛面の外周ワイヤのエッジのみ**(内周ループ=穴リム等は含まない — 2026-07-12確定、docs/occt-gotchas.md §5)/ `edges_between(<a>, <b>)` = 両面(グループ)の共有辺。内周を選ぶには `edges_between(wall面, 対象面)` を使う。幾何ID指定は存在しない。解決は遅延(適用フィーチャーのコンパイル時点、前送り済み束縛面の境界辺から導出 — docs/provides-predicates.md)。
 
 ### 4.2 フィーチャー語彙 T2 — 板金 (P1)
 
@@ -204,13 +204,12 @@ struct CheckResult {
   status: Pass | Fail | Inconclusive { reason },
   measured: Value,
   threshold: Value,
-  margin: f64,          // 基本形 (measured - threshold) / |threshold|
+  margin: f64,          // 基本形 (measured - threshold) / |threshold|。チェッカーごとの定義はdocs/checkers.mdに文書化必須 (ADR-003)
   evidence: Vec<Evidence>,   // { anchors, points, note }
-  cost_ms: u64,
 }
 ```
 
-出力: `results.jsonl`(1行1結果)。決定性: 同一入力でバイト再現(浮動小数の出力桁数を固定)。
+出力: `results.jsonl`(1行1結果、assert_id昇順)。決定性: 同一入力でバイト再現(浮動小数は1e-9量子化して出力)。**cost_ms等の時間情報は正準出力に含めない**(バイト再現と矛盾するため — 2026-07-12決定)。`--timings` 指定時のみ別ストリーム(stderr)に出力する。
 
 ## 7. 寸法公差・幾何公差 (P1)
 
@@ -255,6 +254,7 @@ Design(
   params: [
     Param(id: "wall_t", value: Open(range: (3.0, 6.0), nominal: 4.0), unit: Mm, rationale: "r_wall"),
     Param(id: "bore_d", value: Determined(55.0), unit: Mm, rationale: "r_bore"),
+    Param(id: "bolt_d", value: Determined(6.6), unit: Mm, rationale: "r_bolt"),
   ],
   materials: [Material(id: "a5052", density_g_cm3: 2.68, name: "A5052")],
   parts: [
@@ -264,7 +264,7 @@ Design(
         Block(id: "base", x: 80.0, y: 60.0, z: param("wall_t")),
         Hole(id: "bore", kind: Simple, d: param("bore_d"), depth: Through,
              at: on(feature("base").face("top"), center())),
-        Pattern(id: "bolts", of: Hole(kind: Counterbore, d: 6.6, cb_d: 11.0, cb_depth: 6.5, depth: Through),
+        Pattern(id: "bolts", of: Hole(kind: Simple, d: param("bolt_d"), depth: Through),
                 kind: Linear2D, count: (2,2), pitch: (64.0, 44.0),
                 at: on(feature("base").face("top"), center())),
         Fillet(id: "f1", edges: edges_of(feature("base").face("top")), r: 2.0),
@@ -284,6 +284,8 @@ Design(
     Rationale(id: "r_wall", author: Human("nakag"), basis: Assumption,
               note: "剛性未評価のため仮置き。DFM検証後に確定", timestamp: "2026-07-11T00:00:00Z"),
     Rationale(id: "r_bore", author: Human("nakag"), basis: Standard("JIS B 1521 深溝玉軸受 6006 外径φ55"), note: "座面はめあいH7を想定", timestamp: "2026-07-11T00:00:00Z"),
+    Rationale(id: "r_bolt", author: Human("nakag"), basis: Standard("JIS B 1180 六角ボルト M6"),
+              note: "六角ボルト+平ワッシャ想定のためφ6.6ばか穴(座ぐり不要)", timestamp: "2026-07-12T00:00:00Z"),
     Rationale(id: "r_mass", author: Human("nakag"), basis: Requirement("REQ-012 質量目標"), note: "", timestamp: "2026-07-11T00:00:00Z"),
   ],
 )

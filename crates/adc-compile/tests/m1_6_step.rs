@@ -22,8 +22,8 @@ fn compile_bracket() -> adc_compile::CompiledPart {
 fn step_export_roundtrips_volume() {
     let cp = compile_bracket();
     let v1 = cp.solid.volume();
-    // 妥当性: 板19200 − ボアπ·27.5²·4(≈9503) − 座ぐりφ11×4(≈1521) − 外周フィレット(≈240) ≈ 7936
-    assert!(v1 > 7000.0 && v1 < 10000.0, "{v1}");
+    // 妥当性: 板19200 − ボアπ·27.5²·4(≈9503) − ボルト穴φ6.6×4(≈547) − 外周フィレット(≈240) ≈ 8910
+    assert!(v1 > 8000.0 && v1 < 10000.0, "{v1}");
 
     let dir = std::env::temp_dir().join("adc-m1-6");
     std::fs::create_dir_all(&dir).unwrap();
