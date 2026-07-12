@@ -114,15 +114,17 @@ pub enum Feature {
         #[serde(default)]
         at: Option<Placement>,
     },
-    // ---- T2 板金 (P1) ----
-    /// 板金のルート
+    // ---- T2 板金 (P1, M5-1) ----
+    /// 板金Partのルート専用。板厚は process: SheetMetal.thickness から取る
+    /// (二重定義を排除 — 2026-07-12 M5-1設計メモ承認)。profile中心=配置原点
     BaseFlange {
         #[serde(default)]
         id: Option<FeatureId>,
         profile: Profile,
-        thickness: Expr,
+        #[serde(default)]
+        at: Option<Placement>,
     },
-    /// 展開長はk_factorで算出
+    /// 曲げ+平坦部。曲げ補正BA = angle_rad × (bend_r + k_factor × t) は派生量
     Flange {
         #[serde(default)]
         id: Option<FeatureId>,
@@ -209,10 +211,10 @@ pub enum Pitch {
     Two(Expr, Expr),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ReliefKind {
-    Rect,
-    Round,
+    Rect { w: Expr, d: Expr },
+    Round { d: Expr },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

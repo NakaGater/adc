@@ -347,11 +347,9 @@ impl Ctx<'_> {
                 }
                 self.check_opt_placement(at, part, w);
             }
-            Feature::BaseFlange {
-                profile, thickness, ..
-            } => {
+            Feature::BaseFlange { profile, at, .. } => {
                 self.check_profile(profile, w);
-                self.check_expr(thickness, w);
+                self.check_opt_placement(at, part, w);
             }
             Feature::Flange {
                 edge,
@@ -369,7 +367,14 @@ impl Ctx<'_> {
                 self.check_profile(profile, w);
                 self.check_opt_placement(at, part, w);
             }
-            Feature::Relief { at, .. } => {
+            Feature::Relief { kind, at, .. } => {
+                match kind {
+                    crate::ReliefKind::Rect { w: rw, d } => {
+                        self.check_expr(rw, w);
+                        self.check_expr(d, w);
+                    }
+                    crate::ReliefKind::Round { d } => self.check_expr(d, w),
+                }
                 self.check_opt_placement(at, part, w);
             }
         }
@@ -643,6 +648,57 @@ fn validate(design: &Design, src: &str) -> Vec<ValidationError> {
         }
         if let Process::SheetMetal { thickness, .. } = &part.process {
             ctx.check_expr(thickness, &format!("part \"{}\" の板厚", part.id));
+        }
+        // T2板金フィーチャーの工程整合 (M5-1, 05-schema.md §4.2):
+        // - BaseFlange/Flange/Cutout/Relief は process: SheetMetal のPartのみ
+        // - 板金PartのルートはBaseFlange(専用・1個のみ)
+        let is_sheet = matches!(part.process, Process::SheetMetal { .. });
+        for (i, f) in part.features.iter().enumerate() {
+            let t2 = matches!(
+                f,
+                Feature::BaseFlange { .. }
+                    | Feature::Flange { .. }
+                    | Feature::Cutout { .. }
+                    | Feature::Relief { .. }
+            );
+            let fname = f.id().unwrap_or("(無名)");
+            if t2 && !is_sheet {
+                let span = ctx.loc.reference(fname);
+                ctx.push(
+                    ErrorCode::SchemaRef,
+                    format!(
+                        "part \"{}\" のフィーチャー \"{fname}\" は板金フィーチャーですが、工程が SheetMetal ではありません (05-schema.md §4.2)",
+                        part.id
+                    ),
+                    span,
+                    vec![fname.to_string(), part.id.to_string()],
+                );
+            }
+            let is_base = matches!(f, Feature::BaseFlange { .. });
+            if is_base && i != 0 {
+                let span = ctx.loc.reference(fname);
+                ctx.push(
+                    ErrorCode::SchemaRef,
+                    format!(
+                        "part \"{}\" の BaseFlange \"{fname}\" はルート(先頭フィーチャー)専用です (05-schema.md §4.2)",
+                        part.id
+                    ),
+                    span,
+                    vec![fname.to_string(), part.id.to_string()],
+                );
+            }
+            if is_sheet && i == 0 && !is_base {
+                let span = ctx.loc.reference(fname);
+                ctx.push(
+                    ErrorCode::SchemaRef,
+                    format!(
+                        "板金part \"{}\" のルートフィーチャーは BaseFlange であること (05-schema.md §4.2)",
+                        part.id
+                    ),
+                    span,
+                    vec![fname.to_string(), part.id.to_string()],
+                );
+            }
         }
         for f in &part.features {
             ctx.check_feature(f, &part.id);

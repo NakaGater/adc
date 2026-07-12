@@ -991,3 +991,235 @@ impl Checker for ToleranceStackChecker {
         }
     }
 }
+
+// ================================================================ M5-2
+
+/// SheetMetalRules (M5-2, US-18, docs/checkers.md)。
+/// フィーチャー定義からの代数計算のみ(高速・厳密。ジオメトリ不要)。
+/// 規則(MVP固定値): ①bend_r ≥ 1.0×t ②length ≥ 4×t ③穴縁-曲げ根元 ≥ 2t+bend_r
+pub struct SheetMetalChecker;
+
+/// 代数評価できる穴 (feature_id, ローカルx, ローカルy, 半径)
+type EvalHole = (String, f64, f64, f64);
+
+/// 代数評価できる穴の抽出。BaseFlange(Rect)のtop/bottom面上に center()/xy()
+/// 配置された Simple Hole / Circ Cutout のみ(それ以外は「未評価」として数える)
+fn evaluable_holes(
+    part: &adc_schema::Part,
+    base_id: &str,
+    ev: &Evaluator,
+) -> Result<(Vec<EvalHole>, usize), String> {
+    use adc_schema::{Feature, HoleKind, Placement, Pos2, Profile};
+    let mut holes = Vec::new();
+    let mut skipped = 0usize;
+    let on_base = |at: &Option<Placement>| -> Option<(f64, f64, bool)> {
+        // (dx, dy, 評価可能か)
+        match at {
+            Some(Placement::On { face, at }) => {
+                if face.feature != base_id {
+                    return Some((0.0, 0.0, false));
+                }
+                match &face.elem {
+                    adc_schema::ProvidedElem::Face(n) if n == "top" || n == "bottom" => {}
+                    _ => return Some((0.0, 0.0, false)),
+                }
+                match at {
+                    Pos2::Center => Some((0.0, 0.0, true)),
+                    Pos2::Xy(_, _) => Some((f64::NAN, f64::NAN, true)), // 後で評価
+                    Pos2::FromEdge { .. } => Some((0.0, 0.0, false)),
+                }
+            }
+            _ => Some((0.0, 0.0, false)),
+        }
+    };
+    for f in &part.features {
+        let (fid, d_expr, at) = match f {
+            Feature::Hole {
+                id, kind, d, at, ..
+            } if *kind == HoleKind::Simple => (id.clone().unwrap_or_default(), d.clone(), at),
+            Feature::Hole { .. } => {
+                skipped += 1;
+                continue;
+            }
+            Feature::Cutout { id, profile, at } => match profile {
+                Profile::Circ { d } => (id.clone().unwrap_or_default(), d.clone(), at),
+                Profile::Rect { .. } => {
+                    skipped += 1;
+                    continue;
+                }
+            },
+            _ => continue,
+        };
+        match on_base(at) {
+            Some((_, _, false)) => skipped += 1,
+            Some((dx, dy, true)) => {
+                let (dx, dy) = if dx.is_nan() {
+                    match at {
+                        Some(Placement::On {
+                            at: Pos2::Xy(x, y), ..
+                        }) => (
+                            ev.evaluate(x).map_err(|e| e.to_string())?,
+                            ev.evaluate(y).map_err(|e| e.to_string())?,
+                        ),
+                        _ => unreachable!(),
+                    }
+                } else {
+                    (dx, dy)
+                };
+                let r = ev.evaluate(&d_expr).map_err(|e| e.to_string())? / 2.0;
+                holes.push((fid, dx, dy, r));
+            }
+            None => skipped += 1,
+        }
+    }
+    Ok((holes, skipped))
+}
+
+impl Checker for SheetMetalChecker {
+    fn id(&self) -> &'static str {
+        "sheet_metal_rules"
+    }
+
+    fn check(&self, model: &CompiledModel, ev: &Evaluator, a: &Assertion) -> CheckResult {
+        let Check::SheetMetalRules { part } = &a.check else {
+            unreachable!()
+        };
+        let Some(pdef) = model.part_defs.get(part) else {
+            return CheckResult::inconclusive(&a.id, self.id(), format!("part \"{part}\" が未定義です"));
+        };
+        let sd = match adc_schema::sheet_derived(pdef, ev) {
+            Ok(Some(sd)) => sd,
+            Ok(None) => {
+                return CheckResult::inconclusive(
+                    &a.id,
+                    self.id(),
+                    format!("part \"{part}\" は process: SheetMetal ではありません"),
+                )
+            }
+            Err(e) => return CheckResult::inconclusive(&a.id, self.id(), e.to_string()),
+        };
+        let t = sd.thickness;
+        if sd.bends.is_empty() {
+            return CheckResult {
+                samples: Vec::new(),
+                assert_id: a.id.clone(),
+                checker: self.id().to_string(),
+                status: CheckStatus::Pass,
+                measured: Value::None,
+                threshold: Value::None,
+                margin: 1.0,
+                evidence: vec![Evidence {
+                    anchors: vec![part.clone()],
+                    points: vec![],
+                    note: "曲げなし(平板)— 曲げ規則の対象なし".into(),
+                }],
+            };
+        }
+
+        // ベース寸法と曲げ根元(hole_to_bend用)
+        let base = pdef.features.iter().find_map(|f| match f {
+            adc_schema::Feature::BaseFlange { id, profile, .. } => {
+                if let adc_schema::Profile::Rect { x, y } = profile {
+                    Some((
+                        id.clone().unwrap_or_default(),
+                        ev.evaluate(x).ok()?,
+                        ev.evaluate(y).ok()?,
+                    ))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        });
+
+        // (規則名, feature_id, 実測, 規則値)
+        let mut evaluated: Vec<(&str, String, f64, f64)> = Vec::new();
+        let mut skipped = 0usize;
+        for b in &sd.bends {
+            evaluated.push(("最小曲げ半径(bend_r ≥ 1.0×t)", b.feature_id.clone(), b.bend_r, t));
+            evaluated.push((
+                "フランジ最小長(length ≥ 4×t)",
+                b.feature_id.clone(),
+                b.length,
+                4.0 * t,
+            ));
+        }
+        if let Some((base_id, bx, by)) = &base {
+            let (holes, sk) = match evaluable_holes(pdef, base_id, ev) {
+                Ok(x) => x,
+                Err(e) => return CheckResult::inconclusive(&a.id, self.id(), e),
+            };
+            skipped += sk;
+            for b in &sd.bends {
+                let Some(side) = &b.side else {
+                    skipped += holes.len();
+                    continue;
+                };
+                for (hid, dx, dy, r) in &holes {
+                    let (half, toward) = match side.as_str() {
+                        "+x" => (bx / 2.0, *dx),
+                        "-x" => (bx / 2.0, -*dx),
+                        "+y" => (by / 2.0, *dy),
+                        _ => (by / 2.0, -*dy),
+                    };
+                    let dist = half - toward - r;
+                    evaluated.push((
+                        "穴-曲げ距離(≥ 2t + bend_r)",
+                        format!("{hid}→{}", b.feature_id),
+                        dist,
+                        2.0 * t + b.bend_r,
+                    ));
+                }
+            }
+        }
+
+        let mut margin = f64::INFINITY;
+        let mut worst: Option<&(&str, String, f64, f64)> = None;
+        let mut evidence = Vec::new();
+        for e in &evaluated {
+            let m = (e.2 - e.3) / e.3;
+            if m < margin {
+                margin = m;
+                worst = Some(e);
+            }
+            if e.2 + 1e-9 < e.3 {
+                evidence.push(Evidence {
+                    anchors: vec![e.1.clone()],
+                    points: vec![],
+                    note: format!("{}: 実測 {} < 規則値 {}", e.0, q(e.2), q(e.3)),
+                });
+            }
+        }
+        let pass = evidence.is_empty();
+        let (measured, threshold) = worst
+            .map(|e| (Value::Scalar(q(e.2)), Value::Scalar(q(e.3))))
+            .unwrap_or((Value::None, Value::None));
+        if pass {
+            evidence.push(Evidence {
+                anchors: vec![part.clone()],
+                points: vec![],
+                note: format!(
+                    "全規則Pass(評価 {} 件、未評価の穴配置 {} 件)",
+                    evaluated.len(),
+                    skipped
+                ),
+            });
+        } else if skipped > 0 {
+            evidence.push(Evidence {
+                anchors: vec![part.clone()],
+                points: vec![],
+                note: format!("未評価の穴配置 {skipped} 件(黙って通していない — docs/checkers.md)"),
+            });
+        }
+        CheckResult {
+            samples: Vec::new(),
+            assert_id: a.id.clone(),
+            checker: self.id().to_string(),
+            status: if pass { CheckStatus::Pass } else { CheckStatus::Fail },
+            measured,
+            threshold,
+            margin: q(margin),
+            evidence,
+        }
+    }
+}

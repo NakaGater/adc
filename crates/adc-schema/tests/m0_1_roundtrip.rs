@@ -221,7 +221,7 @@ fn kitchen_sink() -> Design {
                     x: lit(80.0),
                     y: lit(60.0),
                 },
-                thickness: par("sheet_t"),
+                at: None,
             },
             Feature::Flange {
                 id: Some("lip".into()),
@@ -240,7 +240,7 @@ fn kitchen_sink() -> Design {
             },
             Feature::Relief {
                 id: Some("rl1".into()),
-                kind: ReliefKind::Round,
+                kind: ReliefKind::Round { d: lit(4.0) },
                 at: Some(Placement::On {
                     face: face("web", "top"),
                     at: Pos2::Xy(lit(-30.0), lit(20.0)),

@@ -54,6 +54,10 @@ pub struct Explanation {
     pub referenced_by: Vec<RefSite>,
     /// 意味的関連(rationale共有等。柔らかい連想)
     pub related: Vec<RefSite>,
+    /// 派生量(SheetMetal部品の展開長/BA等 — M5-1、05-schema.md §4.2)。
+    /// 公称値評価。後方互換の追加フィールド(explain-schema.md)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub derived: Option<Value>,
 }
 
 /// 参照元(逆参照)の1サイト
@@ -98,6 +102,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
     for p in &design.params {
         if p.id == query {
             matches.push(Explanation {
+                derived: None,
                 kind: "param".into(),
                 id: p.id.clone(),
                 part: None,
@@ -111,6 +116,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
     for m in &design.materials {
         if m.id == query {
             matches.push(Explanation {
+                derived: None,
                 kind: "material".into(),
                 id: m.id.clone(),
                 part: None,
@@ -124,6 +130,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
     for r in &design.rationales {
         if r.id == query {
             matches.push(Explanation {
+                derived: None,
                 kind: "rationale".into(),
                 id: r.id.clone(),
                 part: None,
@@ -136,7 +143,13 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
     }
     for part in &design.parts {
         if part.id == query {
+            // SheetMetal部品は展開長/BAを派生量として提示 (M5-1)。公称値評価
+            let derived = crate::Evaluator::new(design, &crate::EvalContext::nominal())
+                .ok()
+                .and_then(|ev| crate::sheet_derived(part, &ev).ok().flatten())
+                .map(|sd| to_value(&sd));
             matches.push(Explanation {
+                derived,
                 kind: "part".into(),
                 id: part.id.clone(),
                 part: None,
@@ -153,6 +166,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
         for a in &part.anchors {
             if a.id == query {
                 matches.push(Explanation {
+                derived: None,
                     kind: "anchor".into(),
                     id: a.id.clone(),
                     part: Some(part.id.clone()),
@@ -168,6 +182,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
         for inst in &assy.instances {
             if inst.id == query {
                 matches.push(Explanation {
+                derived: None,
                     kind: "instance".into(),
                     id: inst.id.clone(),
                     part: None,
@@ -181,6 +196,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
         for mate in &assy.mates {
             if mate.id == query {
                 matches.push(Explanation {
+                derived: None,
                     kind: "mate".into(),
                     id: mate.id.clone(),
                     part: None,
@@ -195,6 +211,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
     for a in &design.assertions {
         if a.id == query {
             matches.push(Explanation {
+                derived: None,
                 kind: "assertion".into(),
                 id: a.id.clone(),
                 part: None,
@@ -208,6 +225,7 @@ pub fn explain(design: &Design, query: &str) -> ExplainOutput {
     for d in &design.dims {
         if d.id == query {
             matches.push(Explanation {
+                derived: None,
                 kind: "dim".into(),
                 id: d.id.clone(),
                 part: None,
@@ -328,6 +346,7 @@ fn find_features(
 ) {
     if f.id() == Some(query) {
         matches.push(Explanation {
+                derived: None,
             kind: "feature".into(),
             id: query.to_string(),
             part: Some(part.to_string()),
@@ -341,6 +360,7 @@ fn find_features(
     if let Some((base, idx)) = parse_indexed(query) {
         if f.id() == Some(base) && pattern_instance_in_bounds(f, &idx) {
             matches.push(Explanation {
+                derived: None,
                 kind: "feature".into(),
                 id: query.to_string(),
                 part: Some(part.to_string()),
@@ -535,11 +555,9 @@ impl Ix {
                 }
                 self.opt_placement(at, part, &s("at"));
             }
-            Feature::BaseFlange {
-                profile, thickness, ..
-            } => {
+            Feature::BaseFlange { profile, at, .. } => {
                 self.profile(profile, &s("profile"));
-                self.expr(thickness, &s("thickness"));
+                self.opt_placement(at, part, &s("at"));
             }
             Feature::Flange {
                 edge,
@@ -557,7 +575,14 @@ impl Ix {
                 self.profile(profile, &s("profile"));
                 self.opt_placement(at, part, &s("at"));
             }
-            Feature::Relief { at, .. } => {
+            Feature::Relief { kind, at, .. } => {
+                match kind {
+                    crate::ReliefKind::Rect { w, d } => {
+                        self.expr(w, &s("kind.w"));
+                        self.expr(d, &s("kind.d"));
+                    }
+                    crate::ReliefKind::Round { d } => self.expr(d, &s("kind.d")),
+                }
                 self.opt_placement(at, part, &s("at"));
             }
         }

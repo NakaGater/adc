@@ -122,6 +122,8 @@ pub struct CompiledModel {
     pub dof_report: Vec<(String, u8, String)>,
     /// 寸法定義 (§7) — ToleranceStack1D(M5-3)は代数計算のみでここを読む
     pub dims: Vec<adc_schema::Dim>,
+    /// Part宣言 — SheetMetalRules(M5-2)は宣言からの代数計算のみでここを読む
+    pub part_defs: BTreeMap<String, adc_schema::Part>,
 }
 
 impl CompiledModel {
@@ -270,6 +272,11 @@ pub fn compile_model_with(
             assembly_error,
             dof_report,
             dims: design.dims.clone(),
+            part_defs: design
+                .parts
+                .iter()
+                .map(|p| (p.id.clone(), p.clone()))
+                .collect(),
         },
         events,
     )
@@ -366,6 +373,7 @@ fn checker_for(check: &Check) -> Option<&'static dyn Checker> {
         Check::Cog { .. } => Some(&checkers::CogChecker),
         Check::WallThickness { .. } => Some(&checkers::WallThicknessChecker),
         Check::DatumValidity { .. } => Some(&checkers::DatumValidityChecker),
+        Check::SheetMetalRules { .. } => Some(&checkers::SheetMetalChecker),
         Check::ToleranceStack1D { .. } => Some(&checkers::ToleranceStackChecker),
         _ => None,
     }

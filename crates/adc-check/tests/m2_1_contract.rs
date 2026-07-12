@@ -32,7 +32,7 @@ const PASS_A: &str =
 const FAIL_A: &str =
     r#"Assertion(id: "b_bbox", check: BoundingBox(part: "p1", max: (1.0, 50.0, 5.0)), rationale: "r0")"#;
 const INC_A: &str =
-    r#"Assertion(id: "c_smr", check: SheetMetalRules(part: "p1"), rationale: "r0")"#;
+    r#"Assertion(id: "c_smr", check: ToolAccess(part: "p1", tool_axis: (0.0, 0.0, 1.0), tool_d: 6.0), rationale: "r0")"#;
 
 #[test]
 fn results_jsonl_is_byte_identical_across_runs() {
@@ -97,7 +97,8 @@ fn pass_includes_margin_measured_threshold() {
 
 #[test]
 fn compile_failure_makes_inconclusive_not_fail() {
-    // 板金フィーチャー(M5未実装)を持つ部品 → コンパイル失敗 → Inconclusive
+    // 過大フィレット(E-FEATURE-FAIL)でコンパイル失敗する部品 → Inconclusive
+    // (M5で板金が実装されたため、失敗源をフィレットに変更 — 意図は同じ)
     let src = r#"Design(
     schema_version: "0.1",
     intent: "inconclusive fixture",
@@ -105,7 +106,8 @@ fn compile_failure_makes_inconclusive_not_fail() {
     materials: [Material(id: "a5052", density_g_cm3: 2.68, name: "A5052")],
     parts: [
         Part(id: "p1", material: "a5052", process: Machining,
-            features: [BaseFlange(id: "web", profile: Rect(x: 10.0, y: 10.0), thickness: 1.6)],
+            features: [Block(id: "base", x: 10.0, y: 10.0, z: 10.0),
+                Fillet(id: "f1", edges: edges_of(feature("base").face("top")), r: 20.0)],
             anchors: []),
     ],
     assertions: [Assertion(id: "a_bbox", check: BoundingBox(part: "p1", max: (20.0, 20.0, 20.0)), rationale: "r0")],

@@ -132,12 +132,21 @@ enum Pos2 {
 
 ### 4.2 フィーチャー語彙 T2 — 板金 (P1)
 
-| フィーチャー | 主パラメータ | 備考 |
+| フィーチャー | 主パラメータ | provides / 備考 |
 |---|---|---|
-| `BaseFlange` | profile, thickness | 板金のルート |
-| `Flange` | edge(EdgeSelector), angle, length, bend_r | 展開長はk_factorで算出 |
-| `Cutout` | profile, at | フランジ面上 |
-| `Relief` | kind(Rect/Round), at | 曲げ逃げ |
+| `BaseFlange` | profile(MVPはRectのみ), at | face: top/bottom/±x/±y(Block同規約)。板金Partのルート専用。**profile中心=配置原点**(Blockの角原点と異なる — 面ローカル座標の対称性を優先) |
+| `Flange` | edge(EdgeSelector), angle, length, bend_r | face: **bend_inner/bend_outer**(曲げ円筒面)/ **inner/outer**(平坦部内外面)/ **tip**(先端小口)。エッジは**直線1本**に解決されること(複数・曲線はE-FEATURE-FAIL)。angle∈(0°,180°)。曲げは選択面(EdgeSelector第1引数)の反対側へ |
+| `Cutout` | profile, at | face: wall(Circ)/ walls(Rect、集合)。板厚貫通 |
+| `Relief` | kind(Rect(w,d)/Round(d)), at | providesなし。曲げ逃げ(実装はCutoutの特殊形) |
+
+板金の質量特性と展開長(2026-07-12 M5-1設計メモ承認):
+
+- **質量(Mass/Cog)は曲げ後ソリッドの体積から直接計算**する(曲げでも材料体積は
+  保存されるため物理的に正。K-factorは質量補正ではない)
+- **展開長はK-factorによる派生量**: 曲げ補正 BA = angle_rad × (bend_r + k_factor × t)、
+  展開長 L_flat = ベース長(曲げ方向のRect寸法)+ Σ(フランジ平坦長) + Σ BA。
+  explainで部品の派生量として引ける。曲げ方向が混在する部品のL_flatは未定義
+  (BAは常にフィーチャー別に提供)
 
 ## 5. アセンブリ(ADR-005)
 

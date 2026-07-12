@@ -36,7 +36,7 @@ use adc_kernel::{
 use adc_schema::{
     AnchorBindError, AnchorKind, AxisDir, BindingExpr, Count, Design, EdgeSelector, EvalContext,
     Evaluator, Expr, Feature, FeatureFailError, HoleDepth, HoleKind, PatternKind, Placement,
-    Pitch, Pos2, Profile, ProvidedElem, ValidationError,
+    Pitch, Pos2, Process, Profile, ProvidedElem, ReliefKind, ValidationError,
 };
 use frame::{
     add, dot, frame_from_origin_normal, normalize, rotate_frame, scale, sub, world_frame, Frame,
@@ -395,7 +395,7 @@ pub fn compile_part(
         initial_face_frames: HashMap::new(),
     };
     for f in &part.features {
-        compile_feature(f, &mut st, &ev)?;
+        compile_feature(f, &mut st, &ev, &part.process)?;
     }
     let solid = st.solid.ok_or_else(|| CompileError::Geometry {
         feature_id: part_id.to_string(),
@@ -774,7 +774,23 @@ fn profile_tool(
     }
 }
 
-fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), CompileError> {
+/// 板金Partの板厚 (M5-1, §4.2: BaseFlangeは工程から板厚を取る)
+fn sheet_thickness(process: &Process, ev: &Evaluator, fid: &str) -> Result<f64, CompileError> {
+    match process {
+        Process::SheetMetal { thickness, .. } => e_pos(ev, thickness, fid, "process.thickness"),
+        Process::Machining => Err(CompileError::Unsupported {
+            feature_id: fid.to_string(),
+            what: "板金フィーチャーは process: SheetMetal のPartのみ (05-schema.md §4.2)".into(),
+        }),
+    }
+}
+
+fn compile_feature(
+    f: &Feature,
+    st: &mut State,
+    ev: &Evaluator,
+    process: &Process,
+) -> Result<(), CompileError> {
     match f {
         Feature::Block { id, x, y, z, at } => {
             let fid = req_id(id, "Block")?.to_string();
@@ -1125,13 +1141,340 @@ fn compile_feature(f: &Feature, st: &mut State, ev: &Evaluator) -> Result<(), Co
             Ok(())
         }
 
-        other => Err(CompileError::Unsupported {
-            feature_id: other.id().unwrap_or("(無名)").to_string(),
-            what: format!(
-                "このフィーチャーは未対応です(板金=M5、非ルートBlock=M1-3以降): {other:?}"
-            ),
-        }),
+        // ---- T2 板金 (M5-1, docs/design-notes/m5-1-sheet-metal.md 案B) ----
+        Feature::BaseFlange { id, profile, at } => {
+            let fid = req_id(id, "BaseFlange")?.to_string();
+            if st.solid.is_some() {
+                return Err(CompileError::Unsupported {
+                    feature_id: fid,
+                    what: "BaseFlangeはルート(先頭フィーチャー)専用 (05-schema.md §4.2)".into(),
+                });
+            }
+            let t = sheet_thickness(process, ev, &fid)?;
+            let frame = match at {
+                None => world_frame(),
+                Some(p) => resolve_placement(p, st, ev, &fid)?,
+            };
+            require_world_axes(&frame, &fid)?;
+            let Profile::Rect { x, y } = profile else {
+                return Err(CompileError::Unsupported {
+                    feature_id: fid,
+                    what: "BaseFlangeのprofileはMVPではRectのみ (05-schema.md §4.2)".into(),
+                });
+            };
+            let (hx, hy) = (e_pos(ev, x, &fid, "x")? / 2.0, e_pos(ev, y, &fid, "y")? / 2.0);
+            // profile中心=配置原点 (§4.2 — Blockの角原点と異なる)
+            let o = frame.origin;
+            let corners = [
+                add(o, [hx, hy, 0.0]),
+                add(o, [-hx, hy, 0.0]),
+                add(o, [-hx, -hy, 0.0]),
+                add(o, [hx, -hy, 0.0]),
+            ];
+            let solid =
+                make_prism(&corners, 0.0, [0.0, 0.0, t]).map_err(|m| CompileError::Geometry {
+                    feature_id: fid.clone(),
+                    message: m,
+                })?;
+            // provides: Blockと同一の法線分類 (docs/provides-predicates.md T2)
+            for face in solid.faces() {
+                let n = normalize(face.normal());
+                let name = if n[2] > 1.0 - 1e-6 {
+                    "top"
+                } else if n[2] < -1.0 + 1e-6 {
+                    "bottom"
+                } else if n[0] > 1.0 - 1e-6 {
+                    "+x"
+                } else if n[0] < -1.0 + 1e-6 {
+                    "-x"
+                } else if n[1] > 1.0 - 1e-6 {
+                    "+y"
+                } else {
+                    "-y"
+                };
+                st.insert(&fid, name, Provided::Face(face));
+            }
+            st.solid = Some(solid);
+            Ok(())
+        }
+
+        Feature::Flange {
+            id,
+            edge,
+            angle,
+            length,
+            bend_r,
+        } => {
+            let fid = req_id(id, "Flange")?.to_string();
+            let t = sheet_thickness(process, ev, &fid)?;
+            let alpha_deg = e_pos(ev, angle, &fid, "angle")?;
+            if alpha_deg >= 180.0 {
+                return Err(CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid,
+                    occt_error: format!("angle {alpha_deg}° は範囲外"),
+                    hint: Some("Flangeのangleは (0°, 180°) (05-schema.md §4.2)".into()),
+                }));
+            }
+            let alpha = alpha_deg.to_radians();
+            let len = e_pos(ev, length, &fid, "length")?;
+            let r = e_pos(ev, bend_r, &fid, "bend_r")?;
+
+            // 曲げエッジ: 直線1本に解決されること
+            let edges = resolve_edges(edge, st, &fid)?;
+            if edges.len() != 1 {
+                return Err(CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid,
+                    occt_error: format!("曲げエッジが{}本に解決されました", edges.len()),
+                    hint: Some(
+                        "edges_between(<面>, <面>) で直線エッジ1本に特定してください (05-schema.md §4.2)".into(),
+                    ),
+                }));
+            }
+            let e0 = &edges[0];
+            if e0.is_circle() {
+                return Err(CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid,
+                    occt_error: "曲げエッジが直線ではありません".into(),
+                    hint: Some("Flangeは直線エッジのみ対応 (05-schema.md §4.2)".into()),
+                }));
+            }
+            let (p0, p1) = (e0.start(), e0.end());
+            let ev_vec = sub(p1, p0);
+            let w = dot(ev_vec, ev_vec).sqrt();
+            let u = normalize(ev_vec);
+
+            // 曲げ向き (docs/provides-predicates.md T2): 選択面(第1引数)の反対側へ。
+            // 隣接2面: 選択面の法線 = 回転始点、相手面の法線 = 張出方向
+            let solid_ref = st.solid.as_ref().ok_or_else(|| CompileError::Geometry {
+                feature_id: fid.clone(),
+                message: "Flangeの前にBaseFlangeが必要".into(),
+            })?;
+            let adj: Vec<FaceHandle> = solid_ref
+                .faces()
+                .into_iter()
+                .filter(|f| f.edges().iter().any(|e| e.is_same(e0)))
+                .collect();
+            let first_b = match edge {
+                EdgeSelector::EdgesOf(b) => b,
+                EdgeSelector::EdgesBetween(a, _) => a,
+            };
+            let sel_faces = binding_faces(st, first_b, &fid)?;
+            let from_face = adj
+                .iter()
+                .find(|f| sel_faces.iter().any(|sf| sf.is_same(f)));
+            let (z_hat, d_out) = match (from_face, adj.len()) {
+                (Some(ff), 2) => {
+                    let other = adj.iter().find(|f| !f.is_same(ff)).unwrap();
+                    (normalize(ff.normal()), normalize(other.normal()))
+                }
+                _ => {
+                    return Err(CompileError::FeatureFail(FeatureFailError {
+                        feature_id: fid,
+                        occt_error: format!(
+                            "曲げエッジの隣接面を特定できません(隣接{}面)",
+                            adj.len()
+                        ),
+                        hint: Some("エッジ選択の第1引数を板面(top/bottom)にしてください".into()),
+                    }))
+                }
+            };
+            if dot(z_hat, u).abs() > 1e-6 || dot(d_out, u).abs() > 1e-6 || dot(z_hat, d_out).abs() > 1e-6
+            {
+                return Err(CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid,
+                    occt_error: "曲げエッジと隣接面が直交していません".into(),
+                    hint: Some("MVPのFlangeは矩形ベースの直交エッジのみ対応".into()),
+                }));
+            }
+
+            // 曲げ部: 軸=エッジ平行、内半径r。エッジは選択面側の稜線なので
+            // 軸位置 = エッジ − (t + r)·ẑ (docs/design-notes/m5-1-sheet-metal.md)
+            let a0 = add(p0, scale(z_hat, -(t + r)));
+            let ring_err = |occt_error: String| {
+                CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid.clone(),
+                    occt_error,
+                    hint: Some("曲げ部の構築に失敗しました。bend_r・板厚・エッジ長を確認してください".into()),
+                })
+            };
+            let outer = make_cylinder_dir(a0, u, r + t, w);
+            let inner = make_cylinder_dir(sub(a0, scale(u, 0.25)), u, r, w + 0.5);
+            let (tube, _) = outer.cut_with_history(&inner).map_err(&ring_err)?;
+            // 扇形を含む凸ウェッジ(α<180°): dir(θ) = ẑcosθ + d̂sinθ
+            let dir_th = |th: f64| add(scale(z_hat, th.cos()), scale(d_out, th.sin()));
+            let big = 2.0 * (r + t) + 1.0;
+            let rp = big / (alpha / 2.0).cos();
+            let wb = sub(a0, scale(u, 0.25));
+            let wedge_pts = [
+                wb,
+                add(wb, scale(dir_th(0.0), big)),
+                add(wb, scale(dir_th(alpha / 2.0), rp)),
+                add(wb, scale(dir_th(alpha), big)),
+            ];
+            let wedge = make_prism(&wedge_pts, 0.0, scale(u, w + 0.5))
+                .map_err(&ring_err)?;
+            let (sector, _) = tube.intersect_with_history(&wedge).map_err(&ring_err)?;
+
+            // 曲げ円筒面の同定(工具上、軸からの重心距離順: 近=inner / 遠=outer)
+            let dist_to_axis = |c: [f64; 3]| {
+                let d = sub(c, a0);
+                let along = dot(d, u);
+                let radial = sub(d, scale(u, along));
+                dot(radial, radial).sqrt()
+            };
+            let mut cyl: Vec<(f64, FaceHandle)> = sector
+                .faces()
+                .into_iter()
+                .filter(|f| f.surface_kind() == SurfaceKind::Cylinder)
+                .map(|f| (dist_to_axis(f.center()), f))
+                .collect();
+            cyl.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            if cyl.len() != 2 {
+                return Err(CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid,
+                    occt_error: format!("曲げ部の円筒面が{}枚(期待2枚)", cyl.len()),
+                    hint: Some("曲げ部形状が退化しています。bend_r・angleを確認してください".into()),
+                }));
+            }
+            let bend_outer_f = cyl.pop().unwrap().1;
+            let bend_inner_f = cyl.pop().unwrap().1;
+
+            // 平坦部: 曲げ終端の接平面上のスラブ(断面共有で接合 — 接線接触ではない)
+            let dir_a = dir_th(alpha);
+            let tang = add(scale(z_hat, -alpha.sin()), scale(d_out, alpha.cos()));
+            let p_in = add(a0, scale(dir_a, r));
+            let p_out = add(a0, scale(dir_a, r + t));
+            let slab_pts = [
+                p_in,
+                p_out,
+                add(p_out, scale(tang, len)),
+                add(p_in, scale(tang, len)),
+            ];
+            let slab = make_prism(&slab_pts, 0.0, scale(u, w)).map_err(&ring_err)?;
+            let mut inner_f = None;
+            let mut outer_f = None;
+            let mut tip_f = None;
+            for f in slab.faces() {
+                let n = normalize(f.normal());
+                if dot(n, dir_a) < -1.0 + 1e-6 {
+                    inner_f = Some(f);
+                } else if dot(n, dir_a) > 1.0 - 1e-6 {
+                    outer_f = Some(f);
+                } else if dot(n, tang) > 1.0 - 1e-6 {
+                    tip_f = Some(f);
+                }
+            }
+
+            // フューズ(2段): base ∪ 曲げ部 ∪ 平坦部。providesはHistoryで前送り
+            let fuse_err = |occt_error: String| {
+                CompileError::FeatureFail(FeatureFailError {
+                    feature_id: fid.clone(),
+                    occt_error,
+                    hint: Some("フランジの接合ブーリアンが失敗しました".into()),
+                })
+            };
+            let solid = st.solid.take().unwrap();
+            let (s1, h1) = solid.fuse_with_history(&sector).map_err(&fuse_err)?;
+            st.forward_all(&h1, &fid, &s1);
+            let bend_inner_p = forward_face(bend_inner_f, &h1, &fid);
+            let bend_outer_p = forward_face(bend_outer_f, &h1, &fid);
+            let (s2, h2) = s1.fuse_with_history(&slab).map_err(&fuse_err)?;
+            st.forward_all(&h2, &fid, &s2);
+            st.insert(&fid, "bend_inner", forward_entry(bend_inner_p, &h2, &fid, &s2));
+            st.insert(&fid, "bend_outer", forward_entry(bend_outer_p, &h2, &fid, &s2));
+            if let Some(f) = inner_f {
+                st.insert(&fid, "inner", forward_face(f, &h2, &fid));
+            }
+            if let Some(f) = outer_f {
+                st.insert(&fid, "outer", forward_face(f, &h2, &fid));
+            }
+            if let Some(f) = tip_f {
+                st.insert(&fid, "tip", forward_face(f, &h2, &fid));
+            }
+            st.solid = Some(s2);
+            Ok(())
+        }
+
+        Feature::Cutout { id, profile, at } => {
+            let fid = req_id(id, "Cutout")?.to_string();
+            let t = sheet_thickness(process, ev, &fid)?;
+            let p = at.as_ref().ok_or_else(|| CompileError::Geometry {
+                feature_id: fid.clone(),
+                message: "非ルートフィーチャーには配置(at)が必要".into(),
+            })?;
+            let frame = resolve_placement(p, st, ev, &fid)?;
+            apply_through_cut(&fid, profile, &frame, t, st, ev, true)
+        }
+
+        Feature::Relief { id, kind, at } => {
+            let fid = req_id(id, "Relief")?.to_string();
+            let t = sheet_thickness(process, ev, &fid)?;
+            let p = at.as_ref().ok_or_else(|| CompileError::Geometry {
+                feature_id: fid.clone(),
+                message: "非ルートフィーチャーには配置(at)が必要".into(),
+            })?;
+            let frame = resolve_placement(p, st, ev, &fid)?;
+            // 実装はCutoutの特殊形 (§4.2)。providesは載せない
+            let profile = match kind {
+                ReliefKind::Rect { w, d } => Profile::Rect {
+                    x: w.clone(),
+                    y: d.clone(),
+                },
+                ReliefKind::Round { d } => Profile::Circ { d: d.clone() },
+            };
+            apply_through_cut(&fid, &profile, &frame, t, st, ev, false)
+        }
+
     }
+}
+
+/// 板厚貫通の切欠き (Cutout / Relief 共通)。providesはCutoutのみ (§4.2)
+fn apply_through_cut(
+    fid: &str,
+    profile: &Profile,
+    frame: &Frame,
+    t: f64,
+    st: &mut State,
+    ev: &Evaluator,
+    with_provides: bool,
+) -> Result<(), CompileError> {
+    let solid = st.solid.take().ok_or_else(|| CompileError::Geometry {
+        feature_id: fid.to_string(),
+        message: "切欠きの前にソリッドが必要".into(),
+    })?;
+    let n = frame.z;
+    let drill = scale(n, -1.0);
+    let base = add(frame.origin, scale(n, 0.5));
+    let tool = profile_tool(profile, frame, base, drill, t + 1.0, 0.0, ev, fid)?;
+    let (sides, _, _) = classify_prism_faces(&tool, drill);
+    let (result, hist) = solid.cut_with_history(&tool).map_err(|occt_error| {
+        CompileError::FeatureFail(FeatureFailError {
+            feature_id: fid.to_string(),
+            occt_error,
+            hint: Some("切欠きブーリアンが失敗しました。工具寸法・配置を確認してください".into()),
+        })
+    })?;
+    st.forward_all(&hist, fid, &result);
+    if with_provides {
+        match profile {
+            Profile::Circ { .. } => {
+                if let Some(s) = sides.into_iter().next() {
+                    st.insert(fid, "wall", forward_face(s, &hist, fid));
+                }
+            }
+            Profile::Rect { .. } => {
+                let mut walls = Vec::new();
+                for s in sides {
+                    if let Provided::Face(f) = forward_face(s, &hist, fid) {
+                        walls.push(f);
+                    }
+                }
+                st.insert(fid, "walls", Provided::FaceSet(walls));
+            }
+        }
+    }
+    st.solid = Some(result);
+    Ok(())
 }
 
 fn apply_hole(

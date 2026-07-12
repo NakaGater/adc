@@ -94,3 +94,22 @@ adc explain <id> [--design <path>] [--format=json]
   }]
 }
 ```
+
+## 追加フィールド: derived (M5-1、後方互換)
+
+`kind: "part"` の一致に限り、派生量 `derived` を追加出力する(存在しない場合は
+フィールド自体を省略 — 後方互換)。現状は `process: SheetMetal` の部品のみ:
+
+```json
+"derived": {
+  "thickness": 2.0,
+  "k_factor": 0.44,
+  "bends": [{"feature_id": "lip", "ba": 6.094689747964198, "angle_deg": 90.0,
+              "bend_r": 3.0, "length": 20.0, "direction": "x", "side": "+x"}],
+  "flat_length": 76.0946897479642
+}
+```
+
+- BA = angle_rad × (bend_r + k_factor × t)、L_flat = ベース長 + Σ(平坦長 + BA)
+  (05-schema.md §4.2)。曲げ方向が混在する部品の flat_length は null
+- 評価は公称値(EvalContext::nominal)

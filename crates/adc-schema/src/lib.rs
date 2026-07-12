@@ -22,6 +22,7 @@ mod explain;
 mod expr;
 mod ids;
 mod part;
+mod sheet;
 mod tolerance;
 mod validate;
 
@@ -34,6 +35,7 @@ pub use explain::*;
 pub use expr::*;
 pub use ids::*;
 pub use part::*;
+pub use sheet::*;
 pub use tolerance::*;
 pub use validate::*;
 
