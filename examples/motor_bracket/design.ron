@@ -32,7 +32,7 @@ Design(
   ],
   rationales: [
     Rationale(id: "r_wall", author: Human("nakag"), basis: Assumption,
-              note: "剛性未評価のため仮置き。DFM検証後に確定。板幅64はφ55ボアとの面内リガメント(64-55)/2=4.5mmを確保する(最小肉厚2.5に対し余裕)", timestamp: "2026-07-11T00:00:00Z"),
+              note: "剛性未評価のため仮置き。DFM検証後に確定。板幅64はφ55ボアとの面内リガメント(64-55)/2=4.5mmを確保する(最小肉厚2.5に対し余裕)。下限3.0はM4の3点評価+narrowで確定: t=2.0はフィレットr2不能(E-FEATURE-FAIL)、t=2.2は最小肉厚Fail(実測2.2<2.5)、narrow提案は≥2.502 — 探索粒度と製造ばらつきを見込み安全側で3.0を維持(2026-07-12)", timestamp: "2026-07-11T00:00:00Z"),
     Rationale(id: "r_bore", author: Human("nakag"), basis: Standard("JIS B 1521 深溝玉軸受 6006 外径φ55"), note: "座面はめあいH7を想定", timestamp: "2026-07-11T00:00:00Z"),
     Rationale(id: "r_bolt", author: Human("nakag"), basis: Standard("JIS B 1180 六角ボルト M6"),
               note: "六角ボルト+平ワッシャ想定のためφ6.6ばか穴(座ぐり不要)", timestamp: "2026-07-12T00:00:00Z"),
