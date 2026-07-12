@@ -1,0 +1,37 @@
+// C3: E-ANCHOR-BIND{Deleted} — 座ぐりポケットが取付穴のアンカーを食い潰す
+Design(
+    schema_version: "0.1",
+    intent: "センサープレート: ワッシャ座ぐり付き取付穴",
+    params: [],
+    materials: [Material(id: "a5052", density_g_cm3: 2.68, name: "A5052")],
+    parts: [
+        Part(id: "plate", material: "a5052", process: Machining,
+            features: [
+                Block(id: "base", x: 40.0, y: 40.0, z: 10.0),
+                Hole(id: "pin", kind: Simple, d: 10.0, depth: Through,
+                     at: on(feature("base").face("top"), center())),
+                Pocket(id: "spot", profile: Circ(d: 20.0), depth: 11.0,
+                       at: on(feature("base").face("top"), center())),
+            ],
+            anchors: [
+                Anchor(id: "pin_wall", kind: Face, binding: feature("pin").face("wall")),
+                Anchor(id: "mount", kind: Face, binding: feature("base").face("bottom")),
+            ]),
+    ],
+    assembly: Assembly(id: "assy",
+        instances: [Instance(id: "plate_i", part: "plate")],
+        mates: [], ground: "plate_i"),
+    dims: [
+        Dim(id: "d_pin", from: "plate_i.mount", to: "plate_i.pin_wall",
+            nominal: 5.0, tol: Sym(0.1), rationale: "r_dim"),
+    ],
+    assertions: [
+        Assertion(id: "a_env", check: BoundingBox(part: "plate", max: (50.0, 50.0, 12.0)), rationale: "r_env"),
+    ],
+    rationales: [
+        Rationale(id: "r_dim", author: Human("nakag"), basis: Requirement("REQ-D014 ピン穴位置公差"),
+                  note: "取付面基準のピン穴壁位置", timestamp: "2026-07-12T00:00:00Z"),
+        Rationale(id: "r_env", author: Human("nakag"), basis: Assumption,
+                  note: "設置スペース", timestamp: "2026-07-12T00:00:00Z"),
+    ],
+)

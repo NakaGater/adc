@@ -1,0 +1,55 @@
+// C4: E-MATE-UNSOLVED — 廃止漏れの旧mateが矛盾を起こす
+Design(
+    schema_version: "0.1",
+    intent: "ブラケット+シャフト+ハウジング: シャフト配置の改訂(旧配置の廃止)",
+    params: [],
+    materials: [Material(id: "a5052", density_g_cm3: 2.68, name: "A5052")],
+    parts: [
+        Part(id: "bracket", material: "a5052", process: Machining,
+            features: [
+                Block(id: "base", x: 80.0, y: 64.0, z: 4.0),
+                Hole(id: "bore", kind: Simple, d: 55.0, depth: Through,
+                     at: on(feature("base").face("top"), center())),
+            ],
+            anchors: [
+                Anchor(id: "bore_axis", kind: Axis, binding: feature("bore").axis("axis")),
+                Anchor(id: "bearing_bore", kind: Face, binding: feature("bore").face("wall")),
+                Anchor(id: "top_face", kind: Face, binding: feature("base").face("top")),
+                Anchor(id: "mount_face", kind: Face, binding: feature("base").face("bottom")),
+            ]),
+        Part(id: "shaft", material: "a5052", process: Machining,
+            features: [Cylinder(id: "body", d: 50.0, h: 30.0)],
+            anchors: [
+                Anchor(id: "axis", kind: Axis, binding: feature("body").axis("axis")),
+                Anchor(id: "base_face", kind: Face, binding: feature("body").face("bottom")),
+                Anchor(id: "od", kind: Face, binding: feature("body").face("side")),
+            ]),
+        Part(id: "housing", material: "a5052", process: Machining,
+            features: [Block(id: "box", x: 40.0, y: 40.0, z: 20.0)],
+            anchors: [Anchor(id: "top_face", kind: Face, binding: feature("box").face("top"))]),
+    ],
+    assembly: Assembly(id: "mount_assy",
+        instances: [Instance(id: "bracket_i", part: "bracket"),
+                    Instance(id: "shaft_i", part: "shaft"),
+                    Instance(id: "housing_i", part: "housing")],
+        mates: [
+            Mate(id: "m_coax", kind: Coaxial, a: "bracket_i.bore_axis", b: "shaft_i.axis", rationale: "r_pos"),
+            Mate(id: "m_lift", kind: Distance(-2.0), a: "bracket_i.top_face", b: "shaft_i.base_face", rationale: "r_pos"),
+            Mate(id: "m_lift_old", kind: Distance(5.0), a: "bracket_i.top_face", b: "shaft_i.base_face", rationale: "r_old"),
+            Mate(id: "m_house", kind: Coincident, a: "bracket_i.mount_face", b: "housing_i.top_face", rationale: "r_pos"),
+        ],
+        ground: "bracket_i"),
+    assertions: [
+        Assertion(id: "a_clear",
+            check: Clearance(a: "bracket_i.bearing_bore", b: "shaft_i.od", min: 1.0), rationale: "r_fit"),
+        Assertion(id: "b_map", check: NoInterference(scope: All), rationale: "r_fit"),
+    ],
+    rationales: [
+        Rationale(id: "r_pos", author: Human("nakag"), basis: Requirement("REQ-A201 改訂配置"),
+                  note: "シャフト基面は上面から2mm食い込み(ボア貫通)", timestamp: "2026-07-12T00:00:00Z"),
+        Rationale(id: "r_old", author: Human("nakag"), basis: Assumption,
+                  note: "旧配置(上面から5mm浮かせ)。改訂で廃止予定", timestamp: "2026-07-11T00:00:00Z"),
+        Rationale(id: "r_fit", author: Human("nakag"), basis: Requirement("REQ-A103 半径クリアランス1.0mm以上"),
+                  note: "", timestamp: "2026-07-12T00:00:00Z"),
+    ],
+)

@@ -1,0 +1,53 @@
+// C1: クリアランスFail — シャフト仕様変更(φ56、変更不可)への追従
+Design(
+    schema_version: "0.1",
+    intent: "ベアリングブラケット+シャフト: 新シャフト仕様(φ56)への追従",
+    params: [
+        Param(id: "bore_d", value: Determined(55.0), unit: Mm, rationale: "r_bore"),
+        Param(id: "shaft_d", value: Determined(56.0), unit: Mm, rationale: "r_shaft"),
+    ],
+    materials: [Material(id: "a5052", density_g_cm3: 2.68, name: "A5052")],
+    parts: [
+        Part(id: "bracket", material: "a5052", process: Machining,
+            features: [
+                Block(id: "base", x: 80.0, y: 64.0, z: 6.0),
+                Hole(id: "bore", kind: Simple, d: param("bore_d"), depth: Through,
+                     at: on(feature("base").face("top"), center())),
+            ],
+            anchors: [
+                Anchor(id: "bore_axis", kind: Axis, binding: feature("bore").axis("axis")),
+                Anchor(id: "bearing_bore", kind: Face, binding: feature("bore").face("wall")),
+                Anchor(id: "top_face", kind: Face, binding: feature("base").face("top")),
+            ]),
+        Part(id: "shaft", material: "a5052", process: Machining,
+            features: [Cylinder(id: "body", d: param("shaft_d"), h: 30.0)],
+            anchors: [
+                Anchor(id: "axis", kind: Axis, binding: feature("body").axis("axis")),
+                Anchor(id: "base_face", kind: Face, binding: feature("body").face("bottom")),
+                Anchor(id: "od", kind: Face, binding: feature("body").face("side")),
+            ]),
+    ],
+    assembly: Assembly(id: "assy",
+        instances: [Instance(id: "bracket_i", part: "bracket"),
+                    Instance(id: "shaft_i", part: "shaft")],
+        mates: [
+            Mate(id: "m_coax", kind: Coaxial, a: "bracket_i.bore_axis", b: "shaft_i.axis", rationale: "r_pos"),
+            Mate(id: "m_lift", kind: Distance(-2.0), a: "bracket_i.top_face", b: "shaft_i.base_face", rationale: "r_pos"),
+        ],
+        ground: "bracket_i"),
+    assertions: [
+        Assertion(id: "a_clear",
+            check: Clearance(a: "bracket_i.bearing_bore", b: "shaft_i.od", min: 1.0), rationale: "r_fit"),
+        Assertion(id: "b_map", check: NoInterference(scope: All), rationale: "r_fit"),
+    ],
+    rationales: [
+        Rationale(id: "r_bore", author: Human("nakag"), basis: Assumption,
+                  note: "旧シャフトφ55時代の値。見直し可", timestamp: "2026-07-12T00:00:00Z"),
+        Rationale(id: "r_shaft", author: Human("nakag"), basis: Requirement("REQ-A102 新シャフト仕様 φ56"),
+                  note: "駆動側の確定仕様。変更不可", timestamp: "2026-07-12T00:00:00Z"),
+        Rationale(id: "r_fit", author: Human("nakag"), basis: Requirement("REQ-A103 半径クリアランス1.0mm以上"),
+                  note: "", timestamp: "2026-07-12T00:00:00Z"),
+        Rationale(id: "r_pos", author: Human("nakag"), basis: Assumption,
+                  note: "シャフト基面は上面から2mm食い込み(ボア貫通)", timestamp: "2026-07-12T00:00:00Z"),
+    ],
+)

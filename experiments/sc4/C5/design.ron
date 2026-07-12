@@ -1,0 +1,36 @@
+// C5: 質量Fail — 板厚探索域が質量要求を割る(narrow_paramの活用が期待される型)
+Design(
+    schema_version: "0.1",
+    intent: "軽量ブラケット: 板厚は剛性検証まで未確定",
+    params: [
+        Param(id: "wall_t", value: Open(range: (3.0, 12.0), nominal: 4.0), unit: Mm, rationale: "r_wall"),
+        Param(id: "bore_d", value: Determined(55.0), unit: Mm, rationale: "r_bore"),
+    ],
+    materials: [Material(id: "a5052", density_g_cm3: 2.68, name: "A5052")],
+    parts: [
+        Part(id: "bracket", material: "a5052", process: Machining,
+            features: [
+                Block(id: "base", x: 80.0, y: 64.0, z: param("wall_t")),
+                Hole(id: "bore", kind: Simple, d: param("bore_d"), depth: Through,
+                     at: on(feature("base").face("top"), center())),
+            ],
+            anchors: [
+                Anchor(id: "bearing_bore", kind: Face, binding: feature("bore").face("wall")),
+            ]),
+    ],
+    assertions: [
+        Assertion(id: "a_mass", check: Mass(part: "bracket", max: 30.0), rationale: "r_mass"),
+        Assertion(id: "a_wall",
+            check: WallThickness(part: "bracket", min: 2.5, sample_density: 1.0), rationale: "r_dfm"),
+    ],
+    rationales: [
+        Rationale(id: "r_wall", author: Human("nakag"), basis: Assumption,
+                  note: "剛性未評価につき探索域は広めに仮置き", timestamp: "2026-07-12T00:00:00Z"),
+        Rationale(id: "r_bore", author: Human("nakag"), basis: Standard("JIS B 1521 6006 外径φ55"),
+                  note: "", timestamp: "2026-07-12T00:00:00Z"),
+        Rationale(id: "r_mass", author: Human("nakag"), basis: Requirement("REQ-C009 質量30g以下"),
+                  note: "", timestamp: "2026-07-12T00:00:00Z"),
+        Rationale(id: "r_dfm", author: Human("nakag"), basis: Requirement("REQ-B071 最小肉厚2.5mm"),
+                  note: "", timestamp: "2026-07-12T00:00:00Z"),
+    ],
+)

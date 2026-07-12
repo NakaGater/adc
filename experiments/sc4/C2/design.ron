@@ -1,0 +1,30 @@
+// C2: 薄肉Fail — ポケット深さ起因(違反点Evidenceからの逆引き)
+Design(
+    schema_version: "0.1",
+    intent: "電池ボックス: 収容ポケット付きケース",
+    params: [
+        Param(id: "pocket_depth", value: Determined(8.5), unit: Mm, rationale: "r_depth"),
+    ],
+    materials: [Material(id: "a5052", density_g_cm3: 2.68, name: "A5052")],
+    parts: [
+        Part(id: "box", material: "a5052", process: Machining,
+            features: [
+                Block(id: "base", x: 60.0, y: 40.0, z: 10.0),
+                Pocket(id: "cavity", profile: Rect(x: 50.0, y: 30.0), depth: param("pocket_depth"),
+                       at: on(feature("base").face("top"), center())),
+            ],
+            anchors: [
+                Anchor(id: "floor", kind: Face, binding: feature("cavity").face("floor")),
+            ]),
+    ],
+    assertions: [
+        Assertion(id: "a_wall",
+            check: WallThickness(part: "box", min: 2.5, sample_density: 1.0), rationale: "r_dfm"),
+    ],
+    rationales: [
+        Rationale(id: "r_depth", author: Human("nakag"), basis: Assumption,
+                  note: "収容量優先で仮決め。DFM検証後に確定", timestamp: "2026-07-12T00:00:00Z"),
+        Rationale(id: "r_dfm", author: Human("nakag"), basis: Requirement("REQ-B071 最小肉厚2.5mm(A5052切削)"),
+                  note: "", timestamp: "2026-07-12T00:00:00Z"),
+    ],
+)
