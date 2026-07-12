@@ -120,6 +120,8 @@ pub struct CompiledModel {
     pub assembly_error: Option<String>,
     /// 残自由度レポート (instance, 残DOF, note) — 報告のみ(M3-2)
     pub dof_report: Vec<(String, u8, String)>,
+    /// 寸法定義 (§7) — ToleranceStack1D(M5-3)は代数計算のみでここを読む
+    pub dims: Vec<adc_schema::Dim>,
 }
 
 impl CompiledModel {
@@ -267,6 +269,7 @@ pub fn compile_model_with(
             instance_solids,
             assembly_error,
             dof_report,
+            dims: design.dims.clone(),
         },
         events,
     )
@@ -363,6 +366,7 @@ fn checker_for(check: &Check) -> Option<&'static dyn Checker> {
         Check::Cog { .. } => Some(&checkers::CogChecker),
         Check::WallThickness { .. } => Some(&checkers::WallThicknessChecker),
         Check::DatumValidity { .. } => Some(&checkers::DatumValidityChecker),
+        Check::ToleranceStack1D { .. } => Some(&checkers::ToleranceStackChecker),
         _ => None,
     }
 }

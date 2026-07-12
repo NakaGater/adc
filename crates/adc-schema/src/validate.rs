@@ -829,6 +829,28 @@ fn validate(design: &Design, src: &str) -> Vec<ValidationError> {
                         );
                     }
                 }
+                // 連結性 (05-schema.md §7.1): dim[i].to == dim[i+1].from。
+                // 経路の向きを跨いだ暗黙の反転は存在しない
+                let resolved: Vec<_> = path
+                    .iter()
+                    .map(|id| design.dims.iter().find(|d| &d.id == id))
+                    .collect();
+                for pair in resolved.windows(2) {
+                    if let [Some(da), Some(db)] = pair {
+                        if da.to != db.from {
+                            let span = ctx.loc.reference(&db.id);
+                            ctx.push(
+                                ErrorCode::SchemaRef,
+                                format!(
+                                    "{w} の公差スタック経路が連結していません: \"{}\".to ({}) ≠ \"{}\".from ({}) (05-schema.md §7.1)",
+                                    da.id, da.to, db.id, db.from
+                                ),
+                                span,
+                                vec![da.id.clone(), db.id.clone(), a.id.to_string()],
+                            );
+                        }
+                    }
+                }
             }
             Check::ToolAccess { part, tool_d, .. } => {
                 ctx.check_part_ref(part, w);

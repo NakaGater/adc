@@ -270,6 +270,31 @@ struct GeomTol {
 
 MVPでのGeomTolは(1)静的検証(データム参照の妥当性=DatumValidity)と(2)ToleranceStack1Dへの寄与、(3)STEP AP242 PMI出力(努力目標)に使用する。実測検証はスコープ外。
 
+### 7.1 ToleranceStack1D の符号規約と連結性 (M5-3、実装前確定)
+
+- **連結性(静的検証)**: `path: [d1, …, dn]` は `dim[i].to == dim[i+1].from` を満たす
+  こと。非連結は **E-SCHEMA-REF**(静的エラー)。経路の向きを跨いだ暗黙の反転は
+  存在しない
+- **符号規約**: 各Dimの `nominal` は **from→to 方向の符号付き距離**。経路合計は
+  Σnominal。逆向きの寸法を経路に入れる場合は from/to を入れ替えた別Dimとして
+  宣言する(=nominalが負になる場合もある)。公差の `+` 側は常に**そのDimの
+  符号付き値を増やす方向**(経路方向に沿って±を決定)
+- **公差の区間化**: Sym(s) → [−s, +s] / Asym{plus, minus} → [−minus, +plus]
+  (minusは大きさ、`+u/−l` 表記の l)/ Fit("H7"等) → 内蔵テーブル(ISO 286、
+  §7.2)のES/EI。各Dimの中央値 mid = nominal + (upper+lower)/2、半幅
+  half = (upper−lower)/2
+- **合成**: worst-case = Σmid ± Σhalf / RSS = Σmid ± √(Σhalf²)。
+  判定は合成区間 ⊆ target。`method: Both` の判定はworst-case側(RSS区間は
+  常にWC区間に含まれるため)、Evidenceには両区間を明記
+- **実測はしない**: 本チェックはDim宣言からの代数計算のみ(§7の線を維持)
+
+### 7.2 内蔵はめあいテーブル (M5-3)
+
+ISO 286の主要はめあいのみ内蔵: **H7 / h6 / g6**、呼びサイズ 0<d≤120mm。
+サイズ域はISO 286の区分(〜3 / 3〜6 / 6〜10 / 10〜18 / 18〜30 / 30〜50 /
+50〜80 / 80〜120、上端含む)。未知の記号・サイズ域外(>120mm)は
+**Inconclusive**(誤った公差で計算するより判定不能を返す — ADR-003の3値原則)。
+
 ## 8. エラーコード体系
 
 | コード | 意味 |

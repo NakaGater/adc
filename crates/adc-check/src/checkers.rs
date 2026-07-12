@@ -1,7 +1,7 @@
 //! チェッカー実装群。marginの定義は docs/checkers.md が正典 (ADR-003)。
 
 use adc_kernel::{min_distance, DistTarget, Solid};
-use adc_schema::{Assertion, Check, Evaluator, GeomRef, Scope};
+use adc_schema::{Assertion, Check, Evaluator, GeomRef, Scope, StackMethod, Tol};
 
 use crate::{q, q3, CheckResult, CheckStatus, Checker, CompiledModel, Evidence, Value};
 
@@ -692,7 +692,7 @@ impl Checker for WallThicknessChecker {
         }
         let pass = n_viol == 0;
         let (wp, wn, wt) = worst.unwrap();
-        let guarantee = "※レイキャスト近似の一方向保証: 検出した違反は真、未検出は薄肉なしを保証しない";
+        let guarantee = "※レイキャスト近似の一方向保証: 検出した違反は真、未検出は薄肉なしを保証しない((反)平行面間の壁のみ検出)";
         let evidence = vec![Evidence {
             anchors: vec![part.clone()],
             points: vec![q3(wp)],
@@ -855,5 +855,139 @@ fn fail_datum(
             points: vec![],
             note,
         }],
+    }
+}
+
+// ================================================================ M5-3
+
+/// ISO 286 主要はめあいテーブル (05-schema.md §7.2): (upper, lower) [mm]。
+/// 呼びサイズ区分は上端含む (0,3], (3,6], …, (80,120]。対応外はNone
+fn fit_deviations(symbol: &str, size: f64) -> Option<(f64, f64)> {
+    const RANGES: [(f64, f64); 8] = [
+        (0.0, 3.0),
+        (3.0, 6.0),
+        (6.0, 10.0),
+        (10.0, 18.0),
+        (18.0, 30.0),
+        (30.0, 50.0),
+        (50.0, 80.0),
+        (80.0, 120.0),
+    ];
+    const IT7: [f64; 8] = [10.0, 12.0, 15.0, 18.0, 21.0, 25.0, 30.0, 35.0];
+    const IT6: [f64; 8] = [6.0, 8.0, 9.0, 11.0, 13.0, 16.0, 19.0, 22.0];
+    /// 軸gの基礎となる寸法許容差 es [µm](ISO 286-2)
+    const G_ES: [f64; 8] = [-2.0, -4.0, -5.0, -6.0, -7.0, -9.0, -10.0, -12.0];
+    let size = size.abs();
+    let i = RANGES.iter().position(|(lo, hi)| size > *lo && size <= *hi)?;
+    let um = 1e-3;
+    match symbol {
+        "H7" => Some((IT7[i] * um, 0.0)),
+        "h6" => Some((0.0, -IT6[i] * um)),
+        "g6" => Some((G_ES[i] * um, (G_ES[i] - IT6[i]) * um)),
+        _ => None,
+    }
+}
+
+/// ToleranceStack1D (M5-3, US-19, 05-schema.md §7.1)。
+/// Dim宣言からの代数計算のみ(実測しない)。worst-case / RSS / Both。
+pub struct ToleranceStackChecker;
+
+impl Checker for ToleranceStackChecker {
+    fn id(&self) -> &'static str {
+        "tolerance_stack_1d"
+    }
+
+    fn check(&self, model: &CompiledModel, ev: &Evaluator, a: &Assertion) -> CheckResult {
+        let Check::ToleranceStack1D {
+            path,
+            target,
+            method,
+        } = &a.check
+        else {
+            unreachable!()
+        };
+        let (t0, t1) = *target;
+        if (t1 - t0).abs() < 1e-12 {
+            return CheckResult::inconclusive(&a.id, self.id(), "targetの許容幅が退化しています");
+        }
+
+        let mut mid_sum = 0.0;
+        let mut half_sum = 0.0;
+        let mut half_sq = 0.0;
+        let mut contribs: Vec<String> = Vec::new();
+        for id in path {
+            // 存在と連結性は静的検証済み (05-schema.md §7.1)
+            let Some(dim) = model.dims.iter().find(|d| &d.id == id) else {
+                return CheckResult::inconclusive(&a.id, self.id(), format!("dim \"{id}\" が未定義です"));
+            };
+            let nominal = match ev.evaluate(&dim.nominal) {
+                Ok(v) => v,
+                Err(e) => return CheckResult::inconclusive(&a.id, self.id(), e.to_string()),
+            };
+            // 符号規約 (§7.1): +側は常にDimの符号付き値を増やす方向
+            let (upper, lower) = match &dim.tol {
+                Tol::Sym(s) => (*s, -*s),
+                Tol::Asym { plus, minus } => (*plus, -*minus),
+                Tol::Fit(sym) => match fit_deviations(sym, nominal) {
+                    Some(x) => x,
+                    None => {
+                        return CheckResult::inconclusive(
+                            &a.id,
+                            self.id(),
+                            format!(
+                                "dim \"{id}\" のはめあい \"{sym}\"(呼び {})は内蔵テーブル外です (05-schema.md §7.2: H7/h6/g6、0<d≤120mm)",
+                                q(nominal)
+                            ),
+                        )
+                    }
+                },
+            };
+            let mid = nominal + (upper + lower) / 2.0;
+            let half = (upper - lower) / 2.0;
+            mid_sum += mid;
+            half_sum += half;
+            half_sq += half * half;
+            contribs.push(format!("{id}: {} ± {}", q(mid), q(half)));
+        }
+
+        let wc = (mid_sum - half_sum, mid_sum + half_sum);
+        let rss_h = half_sq.sqrt();
+        let rss = (mid_sum - rss_h, mid_sum + rss_h);
+        // Bothの判定はworst-case側(RSS区間は常にWC区間に含まれる — §7.1)
+        let (lo, hi) = match method {
+            StackMethod::Rss => rss,
+            StackMethod::WorstCase | StackMethod::Both => wc,
+        };
+        let pass = lo >= t0 && hi <= t1;
+        let margin = q((lo - t0).min(t1 - hi) / ((t1 - t0) / 2.0));
+
+        let endpoints = {
+            let first = model.dims.iter().find(|d| d.id == path[0]);
+            let last = model.dims.iter().find(|d| Some(&d.id) == path.last());
+            match (first, last) {
+                (Some(f), Some(l)) => format!("経路 {} → {}: ", f.from, l.to),
+                _ => String::new(),
+            }
+        };
+        let interval = |name: &str, iv: (f64, f64)| format!("{name} [{}, {}]", q(iv.0), q(iv.1));
+        let ivs = match method {
+            StackMethod::WorstCase => interval("worst-case", wc),
+            StackMethod::Rss => interval("RSS", rss),
+            StackMethod::Both => format!("{} / {}", interval("worst-case", wc), interval("RSS", rss)),
+        };
+        CheckResult {
+            samples: Vec::new(),
+            assert_id: a.id.clone(),
+            checker: self.id().to_string(),
+            status: if pass { CheckStatus::Pass } else { CheckStatus::Fail },
+            measured: Value::Triple([q(lo), q(mid_sum), q(hi)]),
+            threshold: Value::Triple([q(t0), q((t0 + t1) / 2.0), q(t1)]),
+            margin,
+            evidence: vec![Evidence {
+                anchors: path.clone(),
+                points: vec![],
+                note: format!("{endpoints}{} | {ivs}(許容 [{}, {}])", contribs.join(" / "), q(t0), q(t1)),
+            }],
+        }
     }
 }

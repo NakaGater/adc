@@ -22,7 +22,7 @@
 | コード | 検出内容 | 検出例 | 検出フェーズ |
 |---|---|---|---|
 | E-SCHEMA-PARSE | RON構文・型エラー(行番号付き)。未知/欠落フィールド含む | `intent "コロン欠落"` / `Param(idd: ...)` | parse |
-| E-SCHEMA-REF | 未定義参照: 式内param / Part内feature(binding) / anchor(`instance.anchor`) / material / part / instance / dim(公差スタック経路) / GeomTol.datumsの非Datumアンカー。**M3追加**: 非ground部品のグローバル配置とmate位置決めの併用禁止・groundの被拘束側(b)指定禁止(05-schema.md §5) | `z: param("nope")` / `feature("ghost").face(...)` / `datums: ["i1.top"]`(topがFace) | validate |
+| E-SCHEMA-REF | 未定義参照: 式内param / Part内feature(binding) / anchor(`instance.anchor`) / material / part / instance / dim(公差スタック経路。**M5-3追加**: 経路の連結性 dim[i].to == dim[i+1].from も検査 — 05-schema.md §7.1) / GeomTol.datumsの非Datumアンカー。**M3追加**: 非ground部品のグローバル配置とmate位置決めの併用禁止・groundの被拘束側(b)指定禁止(05-schema.md §5) | `z: param("nope")` / `feature("ghost").face(...)` / `datums: ["i1.top"]`(topがFace) | validate |
 | E-SCHEMA-RATIONALE | 未定義rationale参照(param/assertion/mate/dim/geom_tol) | `rationale: "r_missing"` | validate |
 | E-SCHEMA-DUP | 種別内重複ID(§1.1。feature/anchorは所属Part内スコープ) | param `wall_t` ×2 / 同一Part内feature `base` ×2 | validate |
 | E-SCHEMA-CYCLE | param間の循環参照(Determined式の依存グラフ) | `a: Determined(param("b"))` + `b: Determined(param("a") + 1.0)` | validate / eval |
