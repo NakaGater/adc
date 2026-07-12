@@ -1,0 +1,31 @@
+// ADC設計リポジトリの雛形。このファイルが正典 — ジオメトリはビルド成果物。
+// 使い方: intentを実要求で置き換え、assertions(何を満たせば完成か)から書く。
+// 検証: adc check --design design.ron --format=jsonl
+Design(
+    schema_version: "0.1",
+    intent: "TODO: この設計の目的を1文で(例: モーターマウントブラケット)",
+    params: [
+        // 未確定寸法は Open + Assumption で仮置きする(鉄則2):
+        // Param(id: "wall_t", value: Open(range: (3.0, 6.0), nominal: 4.0), unit: Mm, rationale: "r_wall"),
+        Param(id: "plate_t", value: Determined(4.0), unit: Mm, rationale: "r_start"),
+    ],
+    materials: [
+        Material(id: "a5052", density_g_cm3: 2.68, name: "A5052"),
+    ],
+    parts: [
+        Part(id: "plate", material: "a5052", process: Machining,
+            features: [
+                Block(id: "base", x: 40.0, y: 40.0, z: param("plate_t")),
+            ],
+            anchors: [
+                Anchor(id: "top", kind: Face, binding: feature("base").face("top")),
+            ]),
+    ],
+    assertions: [
+        Assertion(id: "a_mass", check: Mass(part: "plate", max: 100.0), rationale: "r_start"),
+    ],
+    rationales: [
+        Rationale(id: "r_start", author: Human("you"), basis: Assumption,
+                  note: "スターター雛形。実要求のassertionsで置き換える", timestamp: "2026-07-12T00:00:00Z"),
+    ],
+)
