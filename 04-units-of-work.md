@@ -101,8 +101,16 @@ adc/
 
 | Unit | 内容 | US |
 |---|---|---|
-| M6-1 | MCPサーバー (design_read/patch/build_and_check/evidence_query/narrow_param、--gatedモード)。LLM非搭載原則に従う(ADR-006): LLMクライアント・APIキーをリポジトリに持ち込まない。修復用エージェントSkill(`agent-skills/adc-repair`)を同梱 | US-28 |
+| M6-0 | 成功基準3予備実験のフォローアップ小修正(--help/--version、cacheログ静粛化、reportヒント、quickstart導線、要求テンプレ測り方指示、外部リソース事前確認規律) | — |
+| M6-1 | MCPサーバー (design_read/patch/build_and_check/evidence_query/narrow_param **+ explain**(実験で最頻の影響調査操作のため昇格)、--gatedモード)。LLM非搭載原則に従う(ADR-006): LLMクライアント・APIキーをリポジトリに持ち込まない。修復用エージェントSkill(`agent-skills/adc-repair`)を同梱 | US-28 |
 | M6-2 | ToolAccess / MinCornerRadius | US-21 |
+
+**M6バックログ**(成功基準3予備実験の繰越、小修正でないもの):
+
+- **作業ツリーdiff**: `adc diff` は現状コミット済みrevのみ。未コミットの
+  作業ツリーとの比較(`adc diff HEAD` 等)は設計判断(gitの外の状態を
+  どう正準化するか)を含むためM6本体で扱う
+- **「座ぐり深さ≥板厚」警告チェッカー**(M1繰越): M6-2と同時に検討
 
 ---
 

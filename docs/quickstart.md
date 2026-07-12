@@ -3,6 +3,13 @@
 コンテナ起動からサンプルの検証・レポート・STEP目視まで。
 前提: Docker と VS Code(Dev Containers拡張)または devcontainer CLI、git。
 
+> **コンテナを使わない場合(ホスト直インストール)**:
+> `CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo install --git https://github.com/NakaGater/adc adc-cli`
+> (OCCTのソースビルドを含むため初回30〜60分。cmake 4系では
+> `CMAKE_POLICY_VERSION_MINIMUM=3.5` が必須)。
+> ただし**ゴールデン値の数値再現性はdevcontainer(OCCT 7.8.1固定)が正**であり、
+> CI・チーム運用はコンテナ経由を推奨。
+
 > **初回のみの注意**: devcontainerイメージのビルドにはOCCTのソースビルドが
 > 含まれ30分以上かかる。CIが焼いたイメージ
 > (`ghcr.io/nakagater/adc-devcontainer`)をpullできる環境なら、

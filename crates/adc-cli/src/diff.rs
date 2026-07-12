@@ -331,6 +331,10 @@ fn print_text(rep: &DiffReport) {
 }
 
 pub fn diff_cmd(args: &[String]) -> Result<ExitCode, String> {
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        print!("Usage: adc diff <rev1> <rev2> [--design <path>] [--format=text|json]\n\n制約差分(rationale込み)+param変更+体積差(両版build)+margin変化表(両版check)。\ngit revのみ対象(作業ツリーは比較不可 — 変更をコミットしてから)。exit: 0=成功 / 2=E-*\n");
+        return Ok(ExitCode::SUCCESS);
+    }
     let mut design_path = "./design.ron".to_string();
     let mut format = "text".to_string();
     let mut revs: Vec<String> = Vec::new();

@@ -117,6 +117,10 @@ pub fn to_markdown(results: &[CheckResult]) -> String {
 }
 
 pub fn report_cmd(args: &[String]) -> Result<ExitCode, String> {
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        print!("Usage: adc report [<results.jsonl>]\n\nmargin一覧のMarkdownテーブル(Fail先頭→margin昇順)。exit: 0=成功 / 2=E-*\n");
+        return Ok(ExitCode::SUCCESS);
+    }
     let mut path = "results.jsonl".to_string();
     let mut positional_seen = false;
     for a in args {
@@ -128,7 +132,11 @@ pub fn report_cmd(args: &[String]) -> Result<ExitCode, String> {
             other => return Err(format!("不明な引数: {other}")),
         }
     }
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("{path} を読めません: {e}"))?;
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        format!(
+            "{path} を読めません: {e} — ヒント: `adc check --design design.ron --format=jsonl > results.jsonl` で生成できます"
+        )
+    })?;
     let mut results = Vec::new();
     for (i, line) in text.lines().enumerate() {
         if line.trim().is_empty() {

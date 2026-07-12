@@ -9,6 +9,7 @@
 | `adc build` | 正典→B-repコンパイル | `.adc/cache/*.brep`、ビルドサマリ |
 | `adc check` | 全アサーション検証 | `results.jsonl` |
 | `adc check --narrow` | Openパラメータの実行可能区間絞り込み(ADR-004) | suggested_range付きresults |
+| `adc check -v` | cacheイベント等の診断ログをstderrへ(既定は静粛 — M6-0) | (stderr) |
 | `adc diff <rev1> <rev2>` | 制約差分+ジオメトリ差分 | 差分レポート |
 | `adc explain <id>` | Param/Anchor/Assertion/Mateの定義+rationale+参照元一覧 | JSON |
 | `adc export --step [--out <dir>]` | STEP AP242出力(部品/Assy) | `.step` ファイル |
