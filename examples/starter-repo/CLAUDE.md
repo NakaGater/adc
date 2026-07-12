@@ -35,6 +35,15 @@
 - `adc build` というコマンドは**存在しない**(コンパイルはcheck/exportに含まれる)
 - 検証結果を機械で読むときは常に `--format=jsonl`
 
+## MCPサーバー(.mcp.jsonで接続済みの場合)
+
+MCPツール `adc` が使えるときはCLIの代わりにツールを使う(構造化JSONが直接返る):
+design_read / design_patch / build_and_check / evidence_query / narrow_param / explain。
+**design_patchのeditsは一意一致必須**(0件/複数件はE-PATCH — 周辺行込みで一意化)。
+修復ループの定型手順はスキル `adc-repair` を参照(.claude/skills/)。
+サーバーは非gatedが既定(対話セッション — 人間のPRレビューがゲート)。
+gated(--gated)は無人・自動適用時の安全装置で、patchは全Pass時のみ適用される。
+
 ## パターンA: 新規部品の設計
 
 1. 要求を聞いたら、まず assertions + rationales(+ Open params)を書く。

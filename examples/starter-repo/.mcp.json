@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "adc": {
+      "command": "adc-mcp",
+      "args": ["--design", "design.ron"]
+    }
+  }
+}

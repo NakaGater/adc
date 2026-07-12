@@ -570,6 +570,17 @@ pub fn run_checks_interval(design: &Design, opts: &CheckOptions) -> FullRunOutpu
 /// `--narrow` の二分探索反復上限 (ADR-004: デフォルト8)
 const NARROW_MAX_ITERS: u32 = 8;
 
+/// narrowの構造化結果 (M6-1)。evidence noteの文字列表現と同じ値
+/// (q量子化済み)を機械可読で返す。results.jsonlはバイト互換のまま
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SuggestedRange {
+    pub assert_id: String,
+    pub param: String,
+    pub lo: f64,
+    pub hi: f64,
+    pub granularity: f64,
+}
+
 /// `adc check --narrow` (M4-2, ADR-004)。
 ///
 /// 3点評価で**片端Fail**(公称Pass・区間端の一方のみFail)のアサーションに対し、
@@ -578,6 +589,17 @@ const NARROW_MAX_ITERS: u32 = 8;
 /// 当該アサーションのevidenceに付加する。探索は固定回数で決定的(バイト再現)。
 /// 推定区間の境界側はPassを実測した標本値を採用する(保証側に丸める)。
 pub fn run_checks_narrow(design: &Design, opts: &CheckOptions) -> FullRunOutput {
+    run_checks_narrow_structured(design, opts, None).0
+}
+
+/// narrow本体 (M6-1で構造化): `param_filter` 指定時は当該Open軸のみ探索。
+/// 戻り値の`.1`が構造化suggested_range(evidence noteと同値)
+pub fn run_checks_narrow_structured(
+    design: &Design,
+    opts: &CheckOptions,
+    param_filter: Option<&str>,
+) -> (FullRunOutput, Vec<SuggestedRange>) {
+    let mut suggestions: Vec<SuggestedRange> = Vec::new();
     let (mut results, mut timings, mut events, dof) = run_checks_interval(design, opts);
     let axes: Vec<(String, f64, f64, f64)> = design
         .params
@@ -592,6 +614,9 @@ pub fn run_checks_narrow(design: &Design, opts: &CheckOptions) -> FullRunOutput 
     for r in results.iter_mut() {
         let assert_id = r.assert_id.clone();
         for (p, lo, hi, nom) in &axes {
+            if param_filter.is_some_and(|f| f != p) {
+                continue;
+            }
             fn status_of(r: &CheckResult, p: &str, kind: &str) -> Option<CheckStatus> {
                 r.samples
                     .iter()
@@ -636,6 +661,13 @@ pub fn run_checks_narrow(design: &Design, opts: &CheckOptions) -> FullRunOutput 
             }
             let granularity = (fail_end - *nom).abs() / f64::from(1u32 << NARROW_MAX_ITERS);
             let (rlo, rhi) = if lo_fail { (good, *hi) } else { (*lo, good) };
+            suggestions.push(SuggestedRange {
+                assert_id: assert_id.clone(),
+                param: p.clone(),
+                lo: q(rlo),
+                hi: q(rhi),
+                granularity: q(granularity),
+            });
             r.evidence.push(Evidence {
                 anchors: vec![p.clone()],
                 points: vec![],
@@ -648,7 +680,7 @@ pub fn run_checks_narrow(design: &Design, opts: &CheckOptions) -> FullRunOutput 
             });
         }
     }
-    (results, timings, events, dof)
+    ((results, timings, events, dof), suggestions)
 }
 
 /// results.jsonl の正準テキスト(1行1結果、決定的)

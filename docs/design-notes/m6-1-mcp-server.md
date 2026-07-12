@@ -33,15 +33,21 @@ sha256は楽観ロック用(design_patchのbase_sha256に渡す)。
 |---|---|
 | `{ base_sha256: string, edits?: [{old_string, new_string}], full_source?: string, dry_run?: bool }` | `{ applied: bool, new_sha256?: string, validation: { ok: bool, errors: ValidationError[] }, gated_check?: { exit_code, results: CheckResult[] }, rejected_reason?: string }` |
 
-- **表現(要判断b)**: `edits`(完全一致文字列置換の列、適用は宣言順・各1箇所)
-  **または** `full_source`(全置換)。両方指定はエラー。推奨は`edits`
-  (差分が正典に残り、diffレビューと相性が良い)
+- **表現(承認済みb+修正)**: `edits`(完全一致文字列置換の列、適用は宣言順)
+  **または** `full_source`(全置換)。両方指定はエラー。
+  **editsは対象文字列の一意一致を必須とする**: 一致0件・複数件は適用せず
+  構造化エラー `{code: "E-PATCH", kind: "not_found"|"ambiguous", edit_index,
+  occurrences}` を返す(適用曖昧性の拒否 — 2026-07-12承認時修正①)
 - `base_sha256` 不一致 → 適用せず `rejected_reason: "conflict"`(楽観ロック)
 - 静的検証NG → 適用せず errors返却
-- **--gatedモード(要判断c)**: サーバー起動フラグ。ONのとき
+- **--gatedモード(承認済みc+修正)**: サーバー起動フラグ。ONのとき
   patch適用前にフルcheckを走らせ、**exit 0(全Pass)のときのみ**書き込む。
   Fail/Inconclusiveなら書き込まずresultsを返す(エージェントは結果を見て
-  patchを修正して再試行)。呼び出し側からgateを外すことはできない
+  patchを修正して再試行)。呼び出し側からgateを外すことはできない。
+  **用途限定(2026-07-12承認時修正②)**: 対話セッションでは**非gated**が既定
+  (人間のPRレビューがゲートの役割を果たす。Redを正典に刻めることが
+  TDDフローに必要)。gatedは**無人・自動適用**(cron的なエージェント運転等)の
+  安全装置として使う。adc-repairスキルにも同旨を明記する
 - `dry_run: true` は検証+gated checkまで行い書き込まない
 
 ### build_and_check
